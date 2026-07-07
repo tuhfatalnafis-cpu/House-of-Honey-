@@ -1,0 +1,6 @@
+{
+  "name": "Madu Tualang Affiliate Programme MVP",
+  "description": "An e-commerce affiliate commission portal for Madu Tualang wild honey and Virgin Coconut Oil.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
