@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { AppProvider, useAppState } from './context/AppContext';
 import { Navbar } from './components/Navbar';
 import { ProductCatalog } from './components/ProductCatalog';
@@ -22,8 +22,6 @@ import {
   ShieldAlert, 
   Package, 
   MapPin, 
-  CreditCard,
-  Building,
   KeyRound,
   LogOut,
   ChevronRight,
@@ -39,7 +37,6 @@ function MainLayout() {
     currentUserAccount, 
     affiliates, 
     agents,
-    websiteConfig,
     logout,
     cart
   } = useAppState();
@@ -178,7 +175,7 @@ function MainLayout() {
                             )}
                             {activeAgentRecord && (
                               <span className="text-[8.5px] bg-teal-600 text-white font-mono font-extrabold px-1.5 py-0.2 rounded">
-                                Agent ({activeAgentRecord.tier})
+                                Agent ({activeAgentRecord.agentTier})
                               </span>
                             )}
                           </div>
@@ -285,7 +282,7 @@ function MainLayout() {
                               {language === 'ms' ? 'Rangkaian Ejen Reseller' : 'Reseller Agent System'}
                             </p>
                             {activeAgentRecord && (
-                              <span className="text-[8px] bg-green-100 text-green-800 font-extrabold px-1 rounded uppercase">Active ({activeAgentRecord.tier})</span>
+                              <span className="text-[8px] bg-green-100 text-green-800 font-extrabold px-1 rounded uppercase">Active ({activeAgentRecord.agentTier})</span>
                             )}
                           </div>
                           <p className="text-[10px] text-gray-400 leading-none mt-0.5">
@@ -439,7 +436,7 @@ function MainLayout() {
                             Maaf, akaun anda tidak mempunyai kelayakan bertaraf pegawai admin HQ. Kebenaran modul audit transaksi perbankan & KYC simpanan MyKAD dihadkan dengan ketat.
                           </p>
                           <div className="p-3 bg-red-50 text-red-950 text-[10.5px] border border-red-100 rounded-lg font-mono">
-                            Daftar masuk admin: <strong>asyraf@klinikara.com</strong>
+                            Akses terhad kepada akaun pentadbir HQ yang diluluskan sahaja.
                           </div>
                         </div>
                       )
@@ -447,7 +444,7 @@ function MainLayout() {
                       <div className="max-w-md mx-auto space-y-4">
                         <div className="bg-purple-100/50 border border-purple-200 text-purple-950 px-4 py-3 rounded-2xl text-[10.5px] font-bold flex gap-2 items-center">
                           <ShieldAlert className="h-4 w-4 shrink-0 text-purple-700 animate-bounce" />
-                          <span>Mahu audit? Kelayakan: <strong>asyraf@klinikara.com</strong></span>
+                          <span>Modul ini terhad kepada pentadbir HQ. Sila log masuk dengan akaun admin anda.</span>
                         </div>
                         <AuthWindow onSuccess={() => setActiveSubPanel('admin')} initialMode="login" />
                       </div>

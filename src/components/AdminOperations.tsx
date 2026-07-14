@@ -5,7 +5,7 @@
 
 import React, { useState } from 'react';
 import { useAppState } from '../context/AppContext';
-import { Order, UserAccount, UserProfile, BankAccount, UserStatus, WebsitePage, Affiliate, Agent, TierType } from '../types';
+import { Order, UserAccount, UserStatus, WebsitePage, Affiliate, Agent, TierType } from '../types';
 import { 
   ShieldCheck, 
   Award,
@@ -15,21 +15,12 @@ import {
   TrendingUp, 
   Clock,
   Database,
-  Copy,
-  Check,
   AlertCircle,
-  HelpCircle,
-  Loader2,
   Users,
   CheckCircle2,
   Settings,
-  Mail,
-  Lock,
   Eye,
-  Plus,
-  RefreshCw,
   Search,
-  CheckSquare,
   ShieldAlert,
   Send,
   Download,
@@ -37,13 +28,10 @@ import {
   Edit2,
   UserPlus,
   X,
-  Filter,
-  Calendar,
   Phone,
   MapPin,
   CreditCard
 } from 'lucide-react';
-import { getProductTranslation } from '../lib/translations';
 import { isSupabaseConfigured, getSupabaseSQLSchema } from '../lib/supabase';
 import { InventoryManager } from './InventoryManager';
 
@@ -57,7 +45,6 @@ export const AdminOperations: React.FC = () => {
     setSelectedBranchId,
     updateOrderStatus,
     toggleCommissionPaid,
-    restockProduct,
     supabaseConnected,
     seedSupabase,
     language,
@@ -84,9 +71,8 @@ export const AdminOperations: React.FC = () => {
     addAuditLog,
     updateAffiliate,
     updateAgent,
-    addAffiliate,
-    addAgent,
-    purchaseAgentStock
+    purchaseAgentStock,
+    currentUserAccount
   } = useAppState();
 
   const [activeAdminSubTab, setActiveAdminSubTab] = useState<'orders' | 'users' | 'inventory' | 'cms' | 'affiliates' | 'agents' | 'audit' | 'db_viewer'>('orders');
@@ -124,10 +110,27 @@ export const AdminOperations: React.FC = () => {
   const [editAgtTerritory, setEditAgtTerritory] = useState('');
 
   // Bulk / Commission payout processing
-  const [selectedPayoutPeriod, setSelectedPayoutPeriod] = useState('June 2026');
+  // Financial cycle periods generated dynamically (current + previous 2 months)
+  const payoutPeriods = React.useMemo(() => {
+    const fmt = new Intl.DateTimeFormat('en-MY', { month: 'long', year: 'numeric' });
+    return [0, 1, 2].map(offset => {
+      const d = new Date();
+      d.setDate(1);
+      d.setMonth(d.getMonth() - offset);
+      return fmt.format(d);
+    });
+  }, []);
+  const [selectedPayoutPeriod, setSelectedPayoutPeriod] = useState(() => {
+    const fmt = new Intl.DateTimeFormat('en-MY', { month: 'long', year: 'numeric' });
+    return fmt.format(new Date());
+  });
   const [selectedPayoutMethod, setSelectedPayoutMethod] = useState<'bank_transfer' | 'paypal' | 'check'>('bank_transfer');
   const [selectedBankAccountId, setSelectedBankAccountId] = useState('main_business');
-  const [payoutScheduleDate, setPayoutScheduleDate] = useState('2026-07-01');
+  const [payoutScheduleDate, setPayoutScheduleDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7); // default: settle within 7 days
+    return d.toISOString().split('T')[0];
+  });
   const [payoutNotes, setPayoutNotes] = useState('');
   const [bulkCommissionsFeedback, setBulkCommissionsFeedback] = useState<string | null>(null);
 
@@ -136,11 +139,7 @@ export const AdminOperations: React.FC = () => {
   const [invitePhone, setInvitePhone] = useState('');
   const [inviteReferrerId, setInviteReferrerId] = useState('');
   const [inviteSuccessMsg, setInviteSuccessMsg] = useState(false);
-  const [pendingInvites, setPendingInvites] = useState<any[]>([
-    { id: 'inv-1', email: 'razak.harun@gmail.com', date: '2026-06-20', status: 'pending' },
-    { id: 'inv-2', email: 'noraini.sidek@yahoo.com', date: '2026-06-19', status: 'pending' },
-    { id: 'inv-3', email: 'faizal.ismail@outlook.com', date: '2026-06-24', status: 'pending' }
-  ]);
+  const [pendingInvites, setPendingInvites] = useState<any[]>([]);
 
   // Campaign Comms state
   const [campaignChannel, setCampaignChannel] = useState<'email' | 'sms' | 'in_app'>('email');
@@ -148,14 +147,10 @@ export const AdminOperations: React.FC = () => {
   const [campaignSubject, setCampaignSubject] = useState('');
   const [campaignBody, setCampaignBody] = useState('');
   const [campaignFeedback, setCampaignFeedback] = useState<string | null>(null);
-  const [campaignHistory, setCampaignHistory] = useState<any[]>([
-    { id: 'c1', channel: 'email', recipients: 'All Bronze Members', subject: 'Unlock 15% Silver Commissions Today!', date: '2026-06-22', count: 4, status: 'Sent' },
-    { id: 'c2', channel: 'sms', recipients: 'Top Performers', subject: 'Exclusive Honey Harvest Batch Restocked', date: '2026-06-15', count: 2, status: 'Sent' }
-  ]);
+  const [campaignHistory, setCampaignHistory] = useState<any[]>([]);
 
   // Agent Stock / Reorder states
-  const [selectedWarehouse, setSelectedWarehouse] = useState('Primary Kuala Lumpur');
-  const [reorderProductId, setReorderProductId] = useState('p1');
+  const [reorderProductId, setReorderProductId] = useState<string>(products[0]?.id || '');
   const [reorderQty, setReorderQty] = useState(20);
   const [adjustmentReason, setAdjustmentReason] = useState('Manual audit alignment');
   const [stockSuccessMsg, setStockSuccessMsg] = useState<string | null>(null);
@@ -201,8 +196,6 @@ export const AdminOperations: React.FC = () => {
   const [createFeedback, setCreateFeedback] = useState<string | null>(null);
 
   // Inventory manual restock qty
-  const [restockQty, setRestockQty] = useState<{ [key: string]: number }>({});
-  const [restockFeedback, setRestockFeedback] = useState<{ [key: string]: string }>({});
 
   // SQL Script visualizer state
   const [copied, setCopied] = useState(false);
@@ -236,6 +229,7 @@ export const AdminOperations: React.FC = () => {
   const [dbTable, setDbTable] = useState<string>('user_accounts');
   const [dbSearchText, setDbSearchText] = useState<string>('');
   const [viewingDetailRow, setViewingDetailRow] = useState<any | null>(null);
+  const [recordCopied, setRecordCopied] = useState(false);
 
   // Sync edit boxes whenever selected slug changes
   React.useEffect(() => {
@@ -282,20 +276,6 @@ export const AdminOperations: React.FC = () => {
     }
   };
 
-  const handleRestock = (productId: string) => {
-    const qtyToAdd = restockQty[productId] || 0;
-    if (qtyToAdd <= 0) {
-      setRestockFeedback(prev => ({ ...prev, [productId]: 'Enter a positive quantity.' }));
-      return;
-    }
-    restockProduct(productId, qtyToAdd);
-    setRestockQty(prev => ({ ...prev, [productId]: 0 }));
-    setRestockFeedback(prev => ({ ...prev, [productId]: `Restocked +${qtyToAdd} bottles successfully!` }));
-    setTimeout(() => {
-      setRestockFeedback(prev => ({ ...prev, [productId]: '' }));
-    }, 2500);
-  };
-
   // Save Website CMS configurations
   const handleSaveCMSConfig = (e: React.FormEvent) => {
     e.preventDefault();
@@ -330,9 +310,25 @@ export const AdminOperations: React.FC = () => {
     setTimeout(() => setPageSavedMsg(false), 2500);
   };
 
-  // Send Test Email Template Simulated
+  // Send test email: opens the admin's mail client with the rendered template
   const handleSendTestEmail = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!testEmailAddress) return;
+
+    const subjects: Record<string, string> = {
+      welcome_aff: `Welcome ${testVariableUser}! Your Referral link is ready.`,
+      welcome_agt: `Agent Account Created: ${testVariableUser} Tier Confirmation.`,
+      receipt_order: `Shipment receipt confirmation for your ${websiteConfig.siteName} order.`,
+      bank_verified: `Recipient payouts certified - Bank account verification success.`
+    };
+    const bodies: Record<string, string> = {
+      welcome_aff: `Hi ${testVariableUser},\n\nWelcome to the official ${websiteConfig.siteName} Affiliate programme!\n\nYour unique affiliate referral code is: ${testVariableCode}\n\nUse your code to refer shoppers. You earn a 10% commission on Bronze tier, scaling to 20% on Gold tier as your sales volume expands.\n\n${websiteConfig.siteName} HQ, Pahang, Malaysia`,
+      welcome_agt: `Hi ${testVariableUser},\n\nWelcome to the certified reseller family. Your application profile is approved.\n\nOur Pahang warehouse distribution hub has allocated your initial Tualang bulk honey inventory. Manage stock, restocks, and share links from your agent panel.\n\n${websiteConfig.siteName} HQ, Pahang, Malaysia`,
+      receipt_order: `Hi ${testVariableUser},\n\nThank you for shopping pure unprocessed wild honey. Your settlement transaction is verified.\n\nA regional delivery carrier will soon collect your parcel, and tracking updates will be sent directly to your WhatsApp.\n\n${websiteConfig.siteName} HQ, Pahang, Malaysia`,
+      bank_verified: `Hi ${testVariableUser},\n\nWe completed a validation check on your linked bank account details.\n\nYour payouts account is marked ACTIVE. Commission dividends accumulate on direct sales events, with payouts released every month.\n\n${websiteConfig.siteName} HQ, Pahang, Malaysia`
+    };
+
+    window.location.href = `mailto:${testEmailAddress}?subject=${encodeURIComponent(subjects[selectedEmailTemplate] || '')}&body=${encodeURIComponent(bodies[selectedEmailTemplate] || '')}`;
     setEmailPreviewSent(true);
     setTimeout(() => setEmailPreviewSent(false), 4500);
   };
@@ -539,203 +535,178 @@ export const AdminOperations: React.FC = () => {
     <div className="space-y-6 text-left max-w-7xl mx-auto px-4 lg:px-6">
       
       {/* Top control banner header */}
-      <div className="bg-slate-900 text-white p-6 rounded-3xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-md">
+      <div className="bg-white border border-slate-200 p-4 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm">
         <div className="flex items-center gap-3">
-          <div className="h-12 w-12 bg-gradient-to-tr from-blue-600 to-[#1580c2] rounded-2xl flex items-center justify-center text-white shadow-md">
-            <ShieldCheck className="h-6 w-6" />
+          <div className="h-10 w-10 bg-[#1580c2]/10 rounded-xl flex items-center justify-center text-[#1580c2]">
+            <ShieldCheck className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="font-sans text-lg font-bold tracking-tight">HQ Back-Office Resource Control</h2>
-            <p className="font-mono text-[9px] text-gray-400 uppercase tracking-widest mt-0.5">Admin Level Authorized Session</p>
+            <h2 className="font-sans text-lg font-bold text-slate-900">Madu Plus Admin</h2>
+            <p className="text-xs text-slate-400">
+              Admin &middot; {currentUserAccount?.email || 'HQ Session'}
+            </p>
           </div>
         </div>
 
         {/* Global Hub selection */}
-        <div className="flex items-center gap-3 bg-white/10 px-4 py-2 border border-white/10 rounded-2xl w-full md:w-auto">
-          <Building2 className="h-4 w-4 text-emerald-400 shrink-0" />
-          <div className="flex-1 md:flex-initial">
-            <span className="text-[9px] uppercase tracking-wider block font-bold text-gray-400">Branch Gateway</span>
+        <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 border border-slate-200 rounded-xl w-full md:w-auto">
+          <Building2 className="h-4 w-4 text-[#1580c2] shrink-0" />
+          <div className="flex-1 md:flex-initial flex items-center gap-1.5">
+            <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-450">Branch:</span>
             <select
               value={selectedBranchId}
               onChange={e => setSelectedBranchId(e.target.value)}
-              className="bg-transparent border-none text-xs font-black text-white focus:ring-0 focus:outline-none cursor-pointer pr-4"
+              className="bg-transparent border-none text-xs font-bold text-slate-800 focus:ring-0 focus:outline-none cursor-pointer pr-4"
             >
               {branches.map(b => (
-                <option key={b.id} value={b.id} className="text-gray-900 font-bold">{b.name}</option>
+                <option key={b.id} value={b.id} className="text-gray-900 font-bold bg-white">{b.name}</option>
               ))}
             </select>
           </div>
         </div>
       </div>
 
-      {/* Isolation Info Block */}
+      {/* Slim compact status strip */}
       {currentBranch && (
-        <div className="p-4 bg-blue-50/50 border border-blue-100 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 text-xs leading-relaxed">
-          <div>
-            <h4 className="font-bold text-blue-950 flex items-center gap-1.5 uppercase tracking-wide">
-              <span>🌐</span> Station Isolation Node Active
-            </h4>
-            <p className="text-blue-800 font-medium">
-              Fulfillment Node: <strong>{currentBranch.name}</strong> managed under director <strong>{currentBranch.manager}</strong>. Listed telemetry logs belong to this branch.
-            </p>
-          </div>
-          <div className="flex gap-4 shrink-0 shrink bg-white border border-blue-200 px-3 py-2 rounded-xl text-blue-900 font-bold">
-            <div>Station Sales: RM {branchRevenue.toFixed(2)}</div>
-            <div className="border-l border-blue-200 pl-3">Volume: {branchUnits} units</div>
-          </div>
-        </div>
-      )}
-
-      {/* Supabase synchronizations console */}
-      <div className="bg-white border border-gray-100 rounded-3xl p-5 shadow-sm space-y-4">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div className="flex gap-3 items-start">
-            <div className={`p-2.5 rounded-2xl border ${supabaseConnected ? 'bg-emerald-50 text-emerald-800 border-emerald-200 animate-pulse' : 'bg-gray-55 border-gray-150 text-gray-500'}`}>
-              <Database className="h-5 w-5" />
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white border border-slate-200 rounded-2xl px-4 py-2.5 text-xs text-slate-600 shadow-sm">
+          <div className="flex flex-wrap items-center gap-1.5 md:gap-3">
+            <div className="flex items-center gap-1">
+              <Building2 className="h-4 w-4 text-[#1580c2] shrink-0" />
+              <span>
+                Viewing: <strong className="text-slate-900 font-semibold">{currentBranch.name}</strong> &middot; Director <strong className="text-slate-900 font-semibold">{currentBranch.manager}</strong>
+              </span>
             </div>
-            <div>
-              <h4 className="font-sans text-xs font-extrabold text-gray-900 uppercase tracking-widest flex items-center gap-2">
-                <span>Supabase Cloud Integration Layer</span>
-                <span className={`px-2 py-0.5 rounded-full text-[8.5px] font-black uppercase ${supabaseConnected ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-600'}`}>
-                  {supabaseConnected ? 'Connected (Synced)' : 'Sandbox Mode'}
-                </span>
-              </h4>
-              <p className="text-xs text-gray-400 mt-1">
-                {supabaseConnected 
-                  ? 'All verification checkmarks, stock purchases, orders, and static CMS pages are continuously synchronizing with your live cloud schemas.'
-                  : 'Currently operating in browser local memory. Inject VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to synchronize with Postgres.'
-                }
-              </p>
-            </div>
+            <span className="hidden sm:inline text-slate-300">|</span>
+            <span className="text-slate-500 text-[11px]">
+              Sales: <strong className="text-slate-800 font-medium">RM {branchRevenue.toFixed(2)}</strong> &middot; Volume: <strong className="text-slate-800 font-medium">{branchUnits} units</strong>
+            </span>
           </div>
-
+          
           <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {/* Sync Status Pill */}
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-50 border border-slate-200">
+              <span className={`h-1.5 w-1.5 rounded-full ${supabaseConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+              <span className="text-slate-600">
+                {supabaseConnected ? 'Synced to Supabase' : 'Local sandbox'}
+              </span>
+            </div>
+
+            {/* Existing Get Script button */}
             <button
               onClick={() => setShowSql(!showSql)}
-              className="px-3.5 py-1.5 rounded-xl border border-gray-200 bg-gray-50 text-gray-600 font-sans font-semibold text-xs flex items-center gap-1.5 transition-all"
+              className="px-2.5 py-1 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 font-sans font-semibold text-[10px] flex items-center gap-1 transition-all cursor-pointer"
             >
-              <FileText className="h-4 w-4" /> {showSql ? 'Hide SQL Script' : 'Get Script'}
+              <FileText className="h-3.5 w-3.5" /> {showSql ? 'Hide SQL' : 'Get Script'}
             </button>
+
             {isSupabaseConfigured && (
               <button
                 onClick={handleSeedAction}
                 disabled={seeding}
-                className="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-sans font-bold text-xs shadow-md transition-all flex items-center gap-1 cursor-pointer"
+                className="px-3 py-1 rounded-xl bg-[#1580c2] hover:bg-[#116499] text-white font-sans font-bold text-[10px] shadow-sm transition-all flex items-center gap-1 cursor-pointer"
               >
-                {seeding ? 'Seeding Tables...' : 'Seed Database'}
+                {seeding ? 'Seeding...' : 'Seed DB'}
               </button>
             )}
           </div>
         </div>
+      )}
 
-        {seedResult && (
-          <div className={`p-3 rounded-xl text-xs flex gap-2 border leading-relaxed ${seedResult.success ? 'bg-emerald-50 text-emerald-900 border-emerald-200' : 'bg-red-50 text-red-900 border-red-250'}`}>
-            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-            <span>{seedResult.message}</span>
-          </div>
-        )}
+      {seedResult && (
+        <div className={`p-3 rounded-xl text-xs flex gap-2 border leading-relaxed ${seedResult.success ? 'bg-emerald-50 text-emerald-900 border-emerald-200' : 'bg-red-50 text-red-900 border-red-250'}`}>
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <span>{seedResult.message}</span>
+        </div>
+      )}
 
-        {showSql && (
-          <div className="bg-gray-900 p-4 rounded-2xl relative border border-gray-800 text-left">
-            <div className="flex justify-between items-center text-[10px] text-gray-505 border-b border-gray-800 pb-2 mb-3">
-              <span className="font-bold tracking-widest font-mono text-gray-400">POSTGRES TABLE SCHEMA</span>
-              <button 
-                onClick={handleCopySql}
-                className="px-3 py-1 bg-white/5 hover:bg-white/10 text-white rounded-lg text-[9px] font-semibold transition-all flex items-center gap-1"
-              >
-                {copied ? '✓ Copied' : 'Copy Script'}
-              </button>
-            </div>
-            <pre className="text-[10px] text-emerald-400 font-mono overflow-auto max-h-48 whitespace-pre leading-relaxed">
-              {getSupabaseSQLSchema()}
-            </pre>
+      {showSql && (
+        <div className="bg-gray-900 p-4 rounded-2xl relative border border-gray-800 text-left">
+          <div className="flex justify-between items-center text-[10px] text-gray-550 border-b border-gray-800 pb-2 mb-3">
+            <span className="font-bold tracking-widest font-mono text-gray-400">POSTGRES TABLE SCHEMA</span>
+            <button 
+              onClick={handleCopySql}
+              className="px-3 py-1 bg-white/5 hover:bg-white/10 text-white rounded-lg text-[9px] font-semibold transition-all flex items-center gap-1"
+            >
+              {copied ? '✓ Copied' : 'Copy Script'}
+            </button>
           </div>
-        )}
-      </div>
+          <pre className="text-[10px] text-emerald-400 font-mono overflow-auto max-h-48 whitespace-pre leading-relaxed">
+            {getSupabaseSQLSchema()}
+          </pre>
+        </div>
+      )}
 
       {/* High-Level Corporate Financial KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white p-4 rounded-2xl border border-gray-150">
-          <span className="block text-[10px] font-bold text-gray-400 uppercase">Gross Direct Revenue</span>
-          <span className="block text-lg font-mono font-black text-gray-900 mt-1">RM {totalRevenue.toFixed(2)}</span>
-          <span className="text-[9px] text-gray-400 block mt-0.5">Aggregate of paid orders</span>
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm flex flex-col justify-between">
+          <div>
+            <span className="block text-[11px] uppercase tracking-wide font-semibold text-slate-400">Revenue</span>
+            <span className="block text-2xl font-bold text-slate-900 mt-1">RM {totalRevenue.toFixed(2)}</span>
+          </div>
+          <span className="text-[10px] text-emerald-600 font-medium block mt-2">Paid orders</span>
         </div>
-        <div className="bg-white p-4 rounded-2xl border border-gray-150">
-          <span className="block text-[10px] font-bold text-gray-400 uppercase">Commissions Awarded</span>
-          <span className="block text-lg font-mono font-black text-blue-700 mt-1">RM {totalCommissionsOwed.toFixed(2)}</span>
-          <span className="text-[9px] text-gray-400 block mt-0.5">Generated via affiliate links</span>
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm flex flex-col justify-between">
+          <div>
+            <span className="block text-[11px] uppercase tracking-wide font-semibold text-slate-400">Affiliate commissions</span>
+            <span className="block text-2xl font-bold text-slate-900 mt-1">RM {totalCommissionsOwed.toFixed(2)}</span>
+          </div>
+          <span className="text-[10px] text-slate-500 font-medium block mt-2">Generated via links</span>
         </div>
-        <div className="bg-white p-4 rounded-2xl border border-gray-150">
-          <span className="block text-[10px] font-bold text-gray-400 uppercase">Cleared Dividends (Paid)</span>
-          <span className="block text-lg font-mono font-black text-emerald-600 mt-1">RM {totalCommissionsPaid.toFixed(2)}</span>
-          <span className="text-[9px] text-emerald-500 block mt-0.5">Disbursed to partners</span>
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm flex flex-col justify-between">
+          <div>
+            <span className="block text-[11px] uppercase tracking-wide font-semibold text-slate-400">Commissions paid</span>
+            <span className="block text-2xl font-bold text-slate-900 mt-1">RM {totalCommissionsPaid.toFixed(2)}</span>
+          </div>
+          <span className="text-[10px] text-emerald-600 font-medium block mt-2">Disbursed to partners</span>
         </div>
-        <div className="bg-white p-4 rounded-2xl border border-gray-150">
-          <span className="block text-[10px] font-bold text-gray-400 uppercase">Pending Audits (Owed)</span>
-          <span className="block text-lg font-mono font-black text-amber-600 mt-1">RM {totalCommissionsUnpaid.toFixed(2)}</span>
-          <span className="text-[9px] text-amber-500 block mt-0.5">Authorized bank transfers pending</span>
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm flex flex-col justify-between">
+          <div>
+            <span className="block text-[11px] uppercase tracking-wide font-semibold text-slate-400">Commissions pending</span>
+            <span className="block text-2xl font-bold text-slate-900 mt-1">RM {totalCommissionsUnpaid.toFixed(2)}</span>
+          </div>
+          <span className="text-[10px] text-amber-600 font-medium block mt-2">Transfers pending</span>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left column (hidden on mobile/tablet, sticky sidebar on desktop) */}
         <div className="lg:col-span-3 lg:sticky lg:top-24 space-y-4 lg:block hidden">
-          <div className="bg-white rounded-3xl border border-gray-150 p-4.5 shadow-xs space-y-4 text-left">
-            <div className="pb-2 border-b border-gray-100">
-              <span className="text-[9px] uppercase tracking-wider block font-bold text-gray-400">HQ Access Panel</span>
-              <h3 className="font-sans text-xs font-black text-gray-800 uppercase tracking-tight mt-0.5">Control Terminal</h3>
-            </div>
-            
-            {/* Quick Station selection box */}
-            <div className="p-3 bg-slate-50 border border-gray-150 rounded-2xl">
-              <div className="flex items-center gap-1.5 mb-2">
-                <Building2 className="h-3.5 w-3.5 text-[#1580c2]" />
-                <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Gateway Select</span>
-              </div>
-              <select
-                value={selectedBranchId}
-                onChange={e => setSelectedBranchId(e.target.value)}
-                className="w-full bg-white border border-gray-200 rounded-xl py-1 px-2.5 text-xs font-bold text-gray-800 outline-none cursor-pointer"
-              >
-                {branches.map(b => (
-                  <option key={b.id} value={b.id} className="text-gray-900 font-bold">{b.name}</option>
-                ))}
-              </select>
-            </div>
-
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-4 text-left">
             {/* Vertical menu tabs */}
             <div className="space-y-1">
-              <span className="text-[8.5px] uppercase tracking-wider block font-black text-gray-400 px-2 pb-1.5">Modules</span>
+              <span className="text-[11px] uppercase tracking-wide font-semibold text-slate-400 px-2 pb-2 block">
+                Modules
+              </span>
               
               <button
                 onClick={() => setActiveAdminSubTab('orders')}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${activeAdminSubTab === 'orders' ? 'bg-[#1580c2] text-white shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-slate-50'}`}
+                className={`w-full flex items-center justify-between px-3 h-10 text-xs font-semibold rounded-xl transition-all cursor-pointer ${activeAdminSubTab === 'orders' ? 'bg-[#1580c2] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
               >
                 <div className="flex items-center gap-2.5">
                   <FileText className="h-4 w-4" />
                   <span>Orders & Payouts</span>
                 </div>
-                <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded-full ${activeAdminSubTab === 'orders' ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${activeAdminSubTab === 'orders' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'}`}>
                   {isolatedOrders.length}
                 </span>
               </button>
               
               <button
                 onClick={() => setActiveAdminSubTab('users')}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${activeAdminSubTab === 'users' ? 'bg-[#1580c2] text-white shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-slate-50'}`}
+                className={`w-full flex items-center justify-between px-3 h-10 text-xs font-semibold rounded-xl transition-all cursor-pointer ${activeAdminSubTab === 'users' ? 'bg-[#1580c2] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
               >
                 <div className="flex items-center gap-2.5">
                   <Users className="h-4 w-4" />
                   <span>Users & KYC</span>
                 </div>
-                <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded-full ${activeAdminSubTab === 'users' ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${activeAdminSubTab === 'users' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'}`}>
                   {userAccounts.length}
                 </span>
               </button>
               
               <button
                 onClick={() => setActiveAdminSubTab('cms')}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${activeAdminSubTab === 'cms' ? 'bg-[#1580c2] text-white shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-slate-50'}`}
+                className={`w-full flex items-center justify-between px-3 h-10 text-xs font-semibold rounded-xl transition-all cursor-pointer ${activeAdminSubTab === 'cms' ? 'bg-[#1580c2] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
               >
                 <div className="flex items-center gap-2.5">
                   <Settings className="h-4 w-4" />
@@ -745,7 +716,7 @@ export const AdminOperations: React.FC = () => {
               
               <button
                 onClick={() => setActiveAdminSubTab('inventory')}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${activeAdminSubTab === 'inventory' ? 'bg-[#1580c2] text-white shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-slate-50'}`}
+                className={`w-full flex items-center justify-between px-3 h-10 text-xs font-semibold rounded-xl transition-all cursor-pointer ${activeAdminSubTab === 'inventory' ? 'bg-[#1580c2] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
               >
                 <div className="flex items-center gap-2.5">
                   <Package className="h-4 w-4" />
@@ -755,7 +726,7 @@ export const AdminOperations: React.FC = () => {
               
               <button
                 onClick={() => setActiveAdminSubTab('affiliates')}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${activeAdminSubTab === 'affiliates' ? 'bg-[#1580c2] text-white shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-slate-50'}`}
+                className={`w-full flex items-center justify-between px-3 h-10 text-xs font-semibold rounded-xl transition-all cursor-pointer ${activeAdminSubTab === 'affiliates' ? 'bg-[#1580c2] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
               >
                 <div className="flex items-center gap-2.5">
                   <Award className="h-4 w-4" />
@@ -765,33 +736,33 @@ export const AdminOperations: React.FC = () => {
               
               <button
                 onClick={() => setActiveAdminSubTab('agents')}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${activeAdminSubTab === 'agents' ? 'bg-[#1580c2] text-white shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-slate-50'}`}
+                className={`w-full flex items-center justify-between px-3 h-10 text-xs font-semibold rounded-xl transition-all cursor-pointer ${activeAdminSubTab === 'agents' ? 'bg-[#1580c2] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
               >
                 <div className="flex items-center gap-2.5">
                   <Building2 className="h-4 w-4" />
                   <span>Agents & Stock</span>
                 </div>
-                <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded-full ${activeAdminSubTab === 'agents' ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${activeAdminSubTab === 'agents' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'}`}>
                   {agents.length}
                 </span>
               </button>
               
               <button
                 onClick={() => setActiveAdminSubTab('audit')}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${activeAdminSubTab === 'audit' ? 'bg-[#1580c2] text-white shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-slate-50'}`}
+                className={`w-full flex items-center justify-between px-3 h-10 text-xs font-semibold rounded-xl transition-all cursor-pointer ${activeAdminSubTab === 'audit' ? 'bg-[#1580c2] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
               >
                 <div className="flex items-center gap-2.5">
                   <ShieldAlert className="h-4 w-4" />
                   <span>Compliance Logs</span>
                 </div>
-                <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded-full ${activeAdminSubTab === 'audit' ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${activeAdminSubTab === 'audit' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'}`}>
                   {auditLogs.length}
                 </span>
               </button>
               
               <button
                 onClick={() => setActiveAdminSubTab('db_viewer')}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${activeAdminSubTab === 'db_viewer' ? 'bg-[#1580c2] text-white shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-slate-50'}`}
+                className={`w-full flex items-center justify-between px-3 h-10 text-xs font-semibold rounded-xl transition-all cursor-pointer ${activeAdminSubTab === 'db_viewer' ? 'bg-[#1580c2] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
               >
                 <div className="flex items-center gap-2.5">
                   <Database className="h-4 w-4" />
@@ -2079,7 +2050,7 @@ export const AdminOperations: React.FC = () => {
                     <span className="font-bold">
                       {selectedEmailTemplate === 'welcome_aff' && `Welcome ${testVariableUser}! Your Referral link is ready.`}
                       {selectedEmailTemplate === 'welcome_agt' && `Agent Account Created: ${testVariableUser} Tier Confirmation.`}
-                      {selectedEmailTemplate === 'receipt_order' && `Shipment receipt confirmation for order #${Math.random().toString(36).substring(2, 6).toUpperCase()}.`}
+                      {selectedEmailTemplate === 'receipt_order' && `Shipment receipt confirmation for your Madu Plus order.`}
                       {selectedEmailTemplate === 'bank_verified' && `Recipient payouts certified - Bank account verification success.`}
                     </span>
                   </div>
@@ -2089,8 +2060,8 @@ export const AdminOperations: React.FC = () => {
                   <div className="flex-1 flex flex-col items-center justify-center text-center p-6 text-emerald-800 space-y-2 animate-bounce">
                     <CheckCircle2 className="h-8 w-8 text-emerald-600 animate-pulse" />
                     <div>
-                      <p className="font-extrabold text-xs">Simulated Transmission Complete!</p>
-                      <p className="text-[10px] text-gray-500 mt-1">SMTP parsed, variables assigned. Notification trigger processed.</p>
+                      <p className="font-extrabold text-xs">Mail Client Opened!</p>
+                      <p className="text-[10px] text-gray-500 mt-1">Template rendered with your variables — review and hit send in your email app.</p>
                     </div>
                   </div>
                 ) : (
@@ -2455,9 +2426,9 @@ export const AdminOperations: React.FC = () => {
                       onChange={(e) => setSelectedPayoutPeriod(e.target.value)}
                       className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500 mt-1"
                     >
-                      <option value="June 2026">June 2026 (Current Cycle)</option>
-                      <option value="May 2026">May 2026</option>
-                      <option value="April 2026">April 2026</option>
+                      {payoutPeriods.map((period, idx) => (
+                        <option key={period} value={period}>{period}{idx === 0 ? ' (Current Cycle)' : ''}</option>
+                      ))}
                     </select>
                   </div>
 
@@ -2567,13 +2538,13 @@ export const AdminOperations: React.FC = () => {
                       {orders
                         .filter(o => o.affiliateCommission !== undefined)
                         .map(ord => {
-                          const associatedAff = affiliates.find(a => orders.some(ordCheck => ordCheck.id === ord.id && ordCheck.affiliateCommission !== undefined));
+                          const associatedAff = affiliates.find(a => a.code === ord.referralCode);
                           return (
                             <tr key={ord.id} className="hover:bg-gray-50/20">
                               <td className="px-4 py-3 font-mono font-bold text-[#1580c2]">{ord.id}</td>
                               <td className="px-4 py-3">
-                                <p className="font-bold text-gray-900">Referred Sale</p>
-                                <p className="text-[10px] text-gray-400">Order code link transaction</p>
+                                <p className="font-bold text-gray-900">{associatedAff ? associatedAff.name : 'Referred Sale'}</p>
+                                <p className="text-[10px] text-gray-400">{ord.referralCode ? `Code: ${ord.referralCode}` : 'Order code link transaction'}</p>
                               </td>
                               <td className="px-4 py-3 font-mono">RM {ord.total.toFixed(2)}</td>
                               <td className="px-4 py-3 font-mono text-emerald-600 font-bold">RM {ord.affiliateCommission?.toFixed(2)}</td>
@@ -2632,10 +2603,27 @@ export const AdminOperations: React.FC = () => {
                     e.preventDefault();
                     if (!inviteEmail) return;
 
+                    // Build a real registration invite link with upline referral attribution
+                    const referrer = affiliates.find(a => a.id === inviteReferrerId);
+                    const inviteLink = `${window.location.origin}${window.location.pathname}${referrer ? `?ref=${encodeURIComponent(referrer.code)}` : ''}`;
+                    const inviteMessage = language === 'ms'
+                      ? `Salam! Anda dijemput menyertai program Rakan Afiliat ${websiteConfig.siteName}. Daftar di sini: ${inviteLink}${referrer ? ` (Penaja: ${referrer.name})` : ''}`
+                      : `Hi! You are invited to join the ${websiteConfig.siteName} Affiliate Partner programme. Register here: ${inviteLink}${referrer ? ` (Sponsor: ${referrer.name})` : ''}`;
+
+                    // Dispatch: WhatsApp if phone provided, otherwise email client
+                    if (invitePhone.trim()) {
+                      const waNumber = invitePhone.replace(/[^0-9]/g, '');
+                      window.open(`https://wa.me/${waNumber}?text=${encodeURIComponent(inviteMessage)}`, '_blank', 'noopener,noreferrer');
+                    } else {
+                      const subject = language === 'ms' ? `Jemputan Rakan Afiliat ${websiteConfig.siteName}` : `${websiteConfig.siteName} Affiliate Partner Invitation`;
+                      window.location.href = `mailto:${inviteEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(inviteMessage)}`;
+                    }
+
                     const newInv = {
                       id: `inv-${Date.now().toString().slice(-4)}`,
                       email: inviteEmail,
                       phone: invitePhone,
+                      referrerCode: referrer?.code || null,
                       date: new Date().toISOString().split('T')[0],
                       status: 'pending'
                     };
@@ -2645,7 +2633,7 @@ export const AdminOperations: React.FC = () => {
                     setInvitePhone('');
                     setInviteReferrerId('');
                     setInviteSuccessMsg(true);
-                    addAuditLog('Recruit Invitation Sent', 'affiliates', newInv.id, `Dispatched partner recruit link for email: ${inviteEmail}`);
+                    addAuditLog('Recruit Invitation Sent', 'affiliates', newInv.id, `Dispatched partner recruit link for email: ${inviteEmail}${referrer ? ` under upline ${referrer.code}` : ''}`);
                     
                     setTimeout(() => {
                       setInviteSuccessMsg(false);
@@ -2728,25 +2716,28 @@ export const AdminOperations: React.FC = () => {
                   </div>
 
                   <div>
-                    <h5 className="text-[10.5px] font-bold uppercase tracking-wider text-gray-400 mb-2">Hierarchical Sales Network Map</h5>
+                    <h5 className="text-[10.5px] font-bold uppercase tracking-wider text-gray-400 mb-2">Active Referrer Network</h5>
                     <div className="bg-gray-50 rounded-2xl p-3.5 space-y-2 text-[11px]">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-blue-700 font-mono bg-blue-50 px-1.5 py-0.5 rounded text-[9.5px]">GOLD</span>
-                        <span className="font-bold text-gray-900">Ahmad bin Rosli</span>
-                        <span className="text-[9px] text-gray-400">(Leader)</span>
-                      </div>
-                      <div className="pl-6 border-l-2 border-dashed border-gray-200 space-y-2">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-gray-500">└─</span>
-                          <span className="font-bold text-gray-800">Siti Nurhaliza (SITI99)</span>
-                          <span className="text-[9px] text-emerald-600 font-semibold">+6 units referred</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-gray-500">└─</span>
-                          <span className="font-bold text-gray-800">Mohd Hafiz (HAFIZ5)</span>
-                          <span className="text-[9px] text-emerald-600 font-semibold">+3 units referred</span>
-                        </div>
-                      </div>
+                      {affiliates.length === 0 ? (
+                        <p className="text-[10px] text-gray-400 py-2 text-center">No affiliates registered in the network yet.</p>
+                      ) : (
+                        affiliates
+                          .slice()
+                          .sort((a, b) => b.unitsSold - a.unitsSold)
+                          .slice(0, 6)
+                          .map((aff, idx) => (
+                            <div key={aff.id} className="flex items-center gap-2">
+                              <span className={`font-bold font-mono px-1.5 py-0.5 rounded text-[9.5px] uppercase ${
+                                aff.tier === 'Gold' ? 'text-amber-800 bg-amber-50' :
+                                aff.tier === 'Silver' ? 'text-slate-700 bg-slate-100' :
+                                'text-orange-800 bg-orange-50'
+                              }`}>{aff.tier}</span>
+                              <span className="font-bold text-gray-900">{aff.name} ({aff.code})</span>
+                              <span className="text-[9px] text-emerald-600 font-semibold">{aff.unitsSold} units referred</span>
+                              {idx === 0 && aff.unitsSold > 0 && <span className="text-[9px] text-gray-400">(Leader)</span>}
+                            </div>
+                          ))
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2776,25 +2767,60 @@ export const AdminOperations: React.FC = () => {
                     e.preventDefault();
                     if (!campaignSubject || !campaignBody) return;
 
+                    // Resolve the real recipient segment from live affiliate records
+                    const targets = affiliates.filter(aff => {
+                      if ((aff.status || 'active') !== 'active') return false;
+                      if (campaignRecipients === 'all') return true;
+                      if (campaignRecipients === 'top_performers') return aff.unitsSold > 15;
+                      return aff.tier === campaignRecipients;
+                    });
+
+                    if (targets.length === 0) {
+                      setCampaignFeedback('No active affiliates match this segment. Broadcast cancelled.');
+                      setTimeout(() => setCampaignFeedback(null), 4000);
+                      return;
+                    }
+
+                    // Dispatch by channel
+                    if (campaignChannel === 'email') {
+                      const bccList = targets.map(a => a.email).filter(Boolean).join(',');
+                      window.location.href = `mailto:?bcc=${encodeURIComponent(bccList)}&subject=${encodeURIComponent(campaignSubject)}&body=${encodeURIComponent(campaignBody)}`;
+                    } else if (campaignChannel === 'sms') {
+                      // Copy the message so it can be pasted into a bulk SMS/WhatsApp gateway
+                      navigator.clipboard?.writeText(`${campaignSubject}\n\n${campaignBody}`).catch(() => {});
+                    }
+
+                    const segmentLabel = campaignRecipients === 'all'
+                      ? 'All Partners'
+                      : campaignRecipients === 'top_performers'
+                        ? 'Top Performers'
+                        : `${campaignRecipients} Tier`;
+
                     const newCamp = {
                       id: `c-${Date.now().toString().slice(-4)}`,
                       channel: campaignChannel,
-                      recipients: campaignRecipients === 'all' ? 'All Partners' : campaignRecipients,
+                      recipients: segmentLabel,
                       subject: campaignSubject,
                       date: new Date().toISOString().split('T')[0],
-                      count: campaignRecipients === 'all' ? affiliates.length : 2,
-                      status: 'Sent'
+                      count: targets.length,
+                      status: campaignChannel === 'email' ? 'Sent' : 'Copied to clipboard'
                     };
 
                     setCampaignHistory(prev => [newCamp, ...prev]);
                     setCampaignSubject('');
                     setCampaignBody('');
-                    setCampaignFeedback(`Success! Broadcast of "${campaignSubject}" has been dispatched to targeted affiliates.`);
-                    addAuditLog('Dispatched Team Campaign', 'affiliates', newCamp.id, `Subject: ${campaignSubject} via channel ${campaignChannel}`);
+                    setCampaignFeedback(
+                      campaignChannel === 'email'
+                        ? `Email client opened with ${targets.length} affiliate(s) in BCC. Review & hit send.`
+                        : campaignChannel === 'sms'
+                          ? `Message for ${targets.length} affiliate(s) copied to clipboard — paste into your SMS/WhatsApp gateway.`
+                          : `In-app notice logged for ${targets.length} affiliate(s).`
+                    );
+                    addAuditLog('Dispatched Team Campaign', 'affiliates', newCamp.id, `Subject: ${campaignSubject} via channel ${campaignChannel} to ${targets.length} recipients (${segmentLabel})`);
                     
                     setTimeout(() => {
                       setCampaignFeedback(null);
-                    }, 3000);
+                    }, 5000);
                   }}
                   className="space-y-3"
                 >
@@ -2911,38 +2937,50 @@ export const AdminOperations: React.FC = () => {
             <div className="space-y-6">
               {/* Graphic metrics panel */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm flex flex-col justify-between">
-                  <div>
-                    <h5 className="text-[10.5px] uppercase font-bold text-gray-400 tracking-wider">Average Conversion Rate</h5>
-                    <p className="text-3xl font-black text-gray-950 mt-1">14.82%</p>
-                    <p className="text-[9.5px] text-gray-400 mt-2">Clicks leading to successfully settled retail checkouts.</p>
-                  </div>
-                  <div className="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden mt-4">
-                    <div className="bg-[#1580c2] h-full rounded-full" style={{ width: '14.82%' }} />
-                  </div>
-                </div>
+                {(() => {
+                  const referredPaid = paidOrders.filter(o => o.referralCode);
+                  const referredRevenue = referredPaid.reduce((sum, o) => sum + o.total, 0);
+                  const sourcedPct = totalRevenue > 0 ? (referredRevenue / totalRevenue) * 100 : 0;
+                  const avgReferredOrder = referredPaid.length > 0 ? referredRevenue / referredPaid.length : 0;
+                  const activeAffs = affiliates.filter(a => (a.status || 'active') === 'active').length;
+                  const activePct = affiliates.length > 0 ? (activeAffs / affiliates.length) * 100 : 0;
+                  return (
+                    <>
+                      <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm flex flex-col justify-between">
+                        <div>
+                          <h5 className="text-[10.5px] uppercase font-bold text-gray-400 tracking-wider">Affiliate-Sourced Revenue</h5>
+                          <p className="text-3xl font-black text-gray-950 mt-1">{sourcedPct.toFixed(1)}%</p>
+                          <p className="text-[9.5px] text-gray-400 mt-2">RM {referredRevenue.toFixed(2)} of RM {totalRevenue.toFixed(2)} paid revenue came via referral codes.</p>
+                        </div>
+                        <div className="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden mt-4">
+                          <div className="bg-[#1580c2] h-full rounded-full" style={{ width: `${Math.min(100, sourcedPct)}%` }} />
+                        </div>
+                      </div>
 
-                <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm flex flex-col justify-between">
-                  <div>
-                    <h5 className="text-[10.5px] uppercase font-bold text-gray-400 tracking-wider">Affiliate-Sourced Volume</h5>
-                    <p className="text-3xl font-black text-gray-950 mt-1">38.4%</p>
-                    <p className="text-[9.5px] text-gray-400 mt-2">Percentage of total site-wide honey sales generated by affiliates.</p>
-                  </div>
-                  <div className="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden mt-4">
-                    <div className="bg-amber-550 bg-amber-500 h-full rounded-full" style={{ width: '38.4%' }} />
-                  </div>
-                </div>
+                      <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm flex flex-col justify-between">
+                        <div>
+                          <h5 className="text-[10.5px] uppercase font-bold text-gray-400 tracking-wider">Avg Referred Order Value</h5>
+                          <p className="text-3xl font-black text-gray-950 mt-1">RM {avgReferredOrder.toFixed(2)}</p>
+                          <p className="text-[9.5px] text-gray-400 mt-2">Average basket size across {referredPaid.length} paid affiliate-referred order(s).</p>
+                        </div>
+                        <div className="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden mt-4">
+                          <div className="bg-amber-500 h-full rounded-full" style={{ width: `${Math.min(100, (avgReferredOrder / 500) * 100)}%` }} />
+                        </div>
+                      </div>
 
-                <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm flex flex-col justify-between">
-                  <div>
-                    <h5 className="text-[10.5px] uppercase font-bold text-gray-400 tracking-wider">Direct Network Growth</h5>
-                    <p className="text-3xl font-black text-gray-950 mt-1">+18.5% MoM</p>
-                    <p className="text-[9.5px] text-gray-400 mt-2">Net increase of active qualified referrers joining the program.</p>
-                  </div>
-                  <div className="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden mt-4">
-                    <div className="bg-emerald-500 h-full rounded-full" style={{ width: '58%' }} />
-                  </div>
-                </div>
+                      <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm flex flex-col justify-between">
+                        <div>
+                          <h5 className="text-[10.5px] uppercase font-bold text-gray-400 tracking-wider">Active Partner Ratio</h5>
+                          <p className="text-3xl font-black text-gray-950 mt-1">{activePct.toFixed(1)}%</p>
+                          <p className="text-[9.5px] text-gray-400 mt-2">{activeAffs} of {affiliates.length} registered affiliate(s) currently in active standing.</p>
+                        </div>
+                        <div className="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden mt-4">
+                          <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${Math.min(100, activePct)}%` }} />
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
 
               {/* Leaderboards sorting list visual */}
@@ -3043,6 +3081,7 @@ export const AdminOperations: React.FC = () => {
                         className="w-full bg-white border border-gray-200 rounded-xl p-2 text-xs focus:outline-none mt-1"
                       >
                         <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
                         <option value="suspended">Suspended</option>
                         <option value="blacklisted">Blacklisted</option>
                       </select>
@@ -3446,15 +3485,15 @@ export const AdminOperations: React.FC = () => {
                       <p className="font-bold text-[#1580c2] text-[10.5px]">Wholesale Costing Breakdown</p>
                       <div className="flex justify-between">
                         <span>Retail Subtotal:</span>
-                        <span className="font-mono">RM {((products.find(p => p.id === reorderProductId)?.price || 120) * reorderQty).toFixed(2)}</span>
+                        <span className="font-mono">RM {((products.find(p => p.id === reorderProductId)?.price ?? 0) * reorderQty).toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between text-purple-700">
                         <span>Tier Reseller Discount ({selectedAgt.discountRate * 100}%):</span>
-                        <span className="font-mono font-bold">-RM {(((products.find(p => p.id === reorderProductId)?.price || 120) * reorderQty) * selectedAgt.discountRate).toFixed(2)}</span>
+                        <span className="font-mono font-bold">-RM {(((products.find(p => p.id === reorderProductId)?.price ?? 0) * reorderQty) * selectedAgt.discountRate).toFixed(2)}</span>
                       </div>
                       <div className="border-t border-blue-200 pt-1 flex justify-between font-black text-gray-900 text-[12px]">
                         <span>Net Dispatch Cost:</span>
-                        <span className="font-mono text-blue-800">RM {(((products.find(p => p.id === reorderProductId)?.price || 120) * reorderQty) * (1 - selectedAgt.discountRate)).toFixed(2)}</span>
+                        <span className="font-mono text-blue-800">RM {(((products.find(p => p.id === reorderProductId)?.price ?? 0) * reorderQty) * (1 - selectedAgt.discountRate)).toFixed(2)}</span>
                       </div>
                     </div>
                   )}
@@ -3462,9 +3501,9 @@ export const AdminOperations: React.FC = () => {
 
                 <button
                   type="button"
-                  disabled={!selectedAgt}
+                  disabled={!selectedAgt || !products.some(p => p.id === reorderProductId) || reorderQty <= 0}
                   onClick={() => {
-                    if (!selectedAgt) return;
+                    if (!selectedAgt || !products.some(p => p.id === reorderProductId) || reorderQty <= 0) return;
                     purchaseAgentStock(
                       selectedAgt.id,
                       reorderProductId,
@@ -3480,7 +3519,7 @@ export const AdminOperations: React.FC = () => {
                       setStockSuccessMsg(null);
                     }, 4000);
                   }}
-                  className={`w-full text-white font-bold text-xs uppercase py-3 rounded-xl transition-all shadow-xs ${!selectedAgt ? 'bg-gray-300 cursor-not-allowed' : 'bg-[#1580c2] hover:bg-[#116499] cursor-pointer'}`}
+                  className={`w-full text-white font-bold text-xs uppercase py-3 rounded-xl transition-all shadow-xs ${(!selectedAgt || !products.some(p => p.id === reorderProductId) || reorderQty <= 0) ? 'bg-gray-300 cursor-not-allowed' : 'bg-[#1580c2] hover:bg-[#116499] cursor-pointer'}`}
                 >
                   🚚 Authorize & Dispatch Cargo
                 </button>
@@ -3621,38 +3660,52 @@ export const AdminOperations: React.FC = () => {
             <div className="space-y-6">
               {/* Metric panel */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm flex flex-col justify-between">
-                  <div>
-                    <h5 className="text-[10.5px] uppercase font-bold text-gray-400 tracking-wider">Average Reseller Turn Rate</h5>
-                    <p className="text-3xl font-black text-gray-950 mt-1">21.4 Days</p>
-                    <p className="text-[9.5px] text-gray-400 mt-2">Average days an agent takes to clear out dispatched honey stock cargo.</p>
-                  </div>
-                  <div className="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden mt-4">
-                    <div className="bg-[#1580c2] h-full rounded-full" style={{ width: '72%' }} />
-                  </div>
-                </div>
+                {(() => {
+                  const totalStockHeld = agents.reduce((sum, a) => sum + (a.stockBalance || 0), 0);
+                  const totalCapacity = agents.reduce((sum, a) => sum + (a.maxInventory > 0 ? a.maxInventory : 0), 0);
+                  const utilizationPct = totalCapacity > 0 ? (totalStockHeld / totalCapacity) * 100 : 0;
+                  const avgMarginPct = agents.length > 0
+                    ? (agents.reduce((sum, a) => sum + (a.discountRate || 0), 0) / agents.length) * 100
+                    : 0;
+                  const activeAgents = agents.filter(a => (a.status || 'active') === 'active').length;
+                  const activeAgentPct = agents.length > 0 ? (activeAgents / agents.length) * 100 : 0;
+                  return (
+                    <>
+                      <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm flex flex-col justify-between">
+                        <div>
+                          <h5 className="text-[10.5px] uppercase font-bold text-gray-400 tracking-wider">Network Stock Utilization</h5>
+                          <p className="text-3xl font-black text-gray-950 mt-1">{utilizationPct.toFixed(1)}%</p>
+                          <p className="text-[9.5px] text-gray-400 mt-2">{totalStockHeld} units held across agents against {totalCapacity} total warehouse capacity.</p>
+                        </div>
+                        <div className="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden mt-4">
+                          <div className="bg-[#1580c2] h-full rounded-full" style={{ width: `${Math.min(100, utilizationPct)}%` }} />
+                        </div>
+                      </div>
 
-                <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm flex flex-col justify-between">
-                  <div>
-                    <h5 className="text-[10.5px] uppercase font-bold text-gray-400 tracking-wider">HQ Wholesale Margin</h5>
-                    <p className="text-3xl font-black text-gray-950 mt-1">32.8%</p>
-                    <p className="text-[9.5px] text-gray-400 mt-2">Retained profit rate on wholesale agent stock purchasing operations.</p>
-                  </div>
-                  <div className="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden mt-4">
-                    <div className="bg-amber-500 h-full rounded-full" style={{ width: '32.8%' }} />
-                  </div>
-                </div>
+                      <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm flex flex-col justify-between">
+                        <div>
+                          <h5 className="text-[10.5px] uppercase font-bold text-gray-400 tracking-wider">Avg Wholesale Discount Given</h5>
+                          <p className="text-3xl font-black text-gray-950 mt-1">{avgMarginPct.toFixed(1)}%</p>
+                          <p className="text-[9.5px] text-gray-400 mt-2">Average tier discount extended to reseller agents on bulk stock purchases.</p>
+                        </div>
+                        <div className="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden mt-4">
+                          <div className="bg-amber-500 h-full rounded-full" style={{ width: `${Math.min(100, avgMarginPct)}%` }} />
+                        </div>
+                      </div>
 
-                <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm flex flex-col justify-between">
-                  <div>
-                    <h5 className="text-[10.5px] uppercase font-bold text-gray-400 tracking-wider">Agent Retention Rate</h5>
-                    <p className="text-3xl font-black text-gray-950 mt-1">94.5%</p>
-                    <p className="text-[9.5px] text-gray-400 mt-2">Annualized reseller retention rate, illustrating active community loyalty.</p>
-                  </div>
-                  <div className="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden mt-4">
-                    <div className="bg-emerald-500 h-full rounded-full" style={{ width: '94.5%' }} />
-                  </div>
-                </div>
+                      <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm flex flex-col justify-between">
+                        <div>
+                          <h5 className="text-[10.5px] uppercase font-bold text-gray-400 tracking-wider">Active Agent Ratio</h5>
+                          <p className="text-3xl font-black text-gray-950 mt-1">{activeAgentPct.toFixed(1)}%</p>
+                          <p className="text-[9.5px] text-gray-400 mt-2">{activeAgents} of {agents.length} registered agent(s) currently in active operating status.</p>
+                        </div>
+                        <div className="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden mt-4">
+                          <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${Math.min(100, activeAgentPct)}%` }} />
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
 
               {/* Graphical bench list */}
@@ -4236,13 +4289,18 @@ export const AdminOperations: React.FC = () => {
                     </div>
                     <div className="p-3 bg-slate-50 border-t border-gray-100 flex justify-end gap-2 text-xs">
                       <button
-                        onClick={() => {
-                          navigator.clipboard.writeText(JSON.stringify(viewingDetailRow, null, 2));
-                          alert('Record copied to clipboard!');
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(JSON.stringify(viewingDetailRow, null, 2));
+                            setRecordCopied(true);
+                            setTimeout(() => setRecordCopied(false), 2000);
+                          } catch {
+                            setRecordCopied(false);
+                          }
                         }}
                         className="px-3.5 py-1.5 bg-[#EE4D2D] text-white font-sans font-bold rounded-lg cursor-pointer hover:bg-orange-600 transition-colors"
                       >
-                        Copy JSON Row
+                        {recordCopied ? '✓ Copied!' : 'Copy JSON Row'}
                       </button>
                       <button 
                         onClick={() => setViewingDetailRow(null)}

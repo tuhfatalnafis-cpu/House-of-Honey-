@@ -28,7 +28,9 @@ import {
   StockAlert,
   ProductPricingHistory,
   ProductVariant,
-  ProductSupplier
+  ProductSupplier,
+  RecruitmentInvite,
+  Campaign
 } from '../types';
 import { supabaseDb, isSupabaseConfigured } from '../lib/supabase';
 
@@ -55,6 +57,8 @@ interface AppContextType {
   websiteConfig: WebsiteConfig;
   websitePages: WebsitePage[];
   auditLogs: AuditLog[];
+  recruitmentInvites: RecruitmentInvite[];
+  campaigns: Campaign[];
   
   // Advanced Product & Inventory Schema Extensions
   inventory: InventoryItem[];
@@ -182,223 +186,60 @@ interface AppContextType {
   addAgent: (agt: Agent) => void;
   resetToDefaults: () => void;
   seedSupabase: () => Promise<{ success: boolean; message: string }>;
+  addRecruitmentInvite: (invite: Omit<RecruitmentInvite, 'id' | 'createdAt'>) => Promise<RecruitmentInvite>;
+  addCampaign: (campaign: Omit<Campaign, 'id' | 'createdAt'>) => Promise<Campaign>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 // Initial Standard Mock Baseline Data
-const DEFAULT_PRODUCTS: Product[] = [
-  {
-    id: 'p1',
-    name: 'Madu Tualang Genting - Raw Wild Honey',
-    category: 'Honey',
-    price: 120,
-    description: 'Pure, unprocessed wild honey harvested from giant Tualang trees in Genting highlands, Pahang. Rich in antioxidants with a distinctive floral note.',
-    stock: 40,
-    volume: '500g',
-    image: 'https://images.unsplash.com/photo-1587049352846-4a222e784d38?auto=format&fit=crop&q=80&w=400'
-  },
-  {
-    id: 'p2',
-    name: 'Madu Tualang Lipis - Premium Black Honey',
-    category: 'Honey',
-    price: 150,
-    description: 'Rare black wild honey (Madu Hitam) from Kuala Lipis. Harvested from older combs deep in the jungle. Recommended for immune support and stamina.',
-    stock: 25,
-    volume: '500g',
-    image: 'https://images.unsplash.com/photo-1558642452-9d2a7deb7f62?auto=format&fit=crop&q=80&w=400'
-  }
-];
+const DEFAULT_PRODUCTS: Product[] = [];
 
-const DEFAULT_ACCOUNTS: UserAccount[] = [
-  { id: 'acc-admin', email: 'asyraf@klinikara.com', userType: 'admin', status: 'active', createdAt: '2026-01-01T00:00:00Z' },
-  { id: 'acc-ahmad', email: 'ahmad.rosli@example.my', userType: 'affiliate', status: 'active', createdAt: '2026-04-10T11:00:00Z' },
-  { id: 'acc-sarah', email: 'sarah.ismail@example.my', userType: 'affiliate', status: 'active', createdAt: '2026-03-12T14:30:00Z' },
-  { id: 'acc-kamal', email: 'kamal.ariffin@example.my', userType: 'agent', status: 'active', createdAt: '2026-01-01T10:00:00Z' },
-  { id: 'acc-lee', email: 'chongwei@example.com', userType: 'customer', status: 'active', createdAt: '2026-06-18T09:12:00Z' }
-];
+const DEFAULT_ACCOUNTS: UserAccount[] = [];
 
-const DEFAULT_PROFILES: UserProfile[] = [
-  { id: 'prof-admin', userId: 'acc-admin', fullName: 'Dr Asyraf Saharudin', icNumber: '880112-14-5567', icVerified: true, dateOfBirth: '1988-01-12', phoneNumber: '+6011223344', whatsappNumber: '+6011223344' },
-  { id: 'prof-ahmad', userId: 'acc-ahmad', fullName: 'Ahmad bin Rosli', icNumber: '920410-06-5321', icVerified: true, dateOfBirth: '1992-04-10', phoneNumber: '+60112345678', whatsappNumber: '+60112345678' },
-  { id: 'prof-sarah', userId: 'acc-sarah', fullName: 'Sarah binti Ismail', icNumber: '950312-08-5432', icVerified: true, dateOfBirth: '1995-03-12', phoneNumber: '+60198765432', whatsappNumber: '+60198765432' },
-  { id: 'prof-kamal', userId: 'acc-kamal', fullName: 'Kamal bin Ariffin', icNumber: '890105-03-5123', icVerified: true, dateOfBirth: '1989-01-05', phoneNumber: '+60133334444', whatsappNumber: '+60133334444' },
-  { id: 'prof-lee', userId: 'acc-lee', fullName: 'Lee Chong Wei', icNumber: '821021-08-6677', icVerified: false, dateOfBirth: '1982-10-21', phoneNumber: '+60124445555', whatsappNumber: '+60124445555' }
-];
+const DEFAULT_PROFILES: UserProfile[] = [];
 
-const DEFAULT_ADDRESSES: UserAddress[] = [
-  { id: 'adr-ahmad', userId: 'acc-ahmad', addressType: 'delivery', fullAddress: 'Jalan Bukit Bintang, Pavilion Residences, Tower A-5-2', postalCode: '55100', city: 'Kuala Lumpur', state: 'Wilayah Persekutuan', country: 'Malaysia', isDefault: true },
-  { id: 'adr-sarah', userId: 'acc-sarah', addressType: 'both', fullAddress: 'A-12-3, Vista Kondo, Ampang', postalCode: '68000', city: 'Ampang', state: 'Selangor', country: 'Malaysia', isDefault: true },
-  { id: 'adr-kamal', userId: 'acc-kamal', addressType: 'delivery', fullAddress: 'Kampung Sungai Miang', postalCode: '26600', city: 'Pekan', state: 'Pahang', country: 'Malaysia', isDefault: true }
-];
+const DEFAULT_ADDRESSES: UserAddress[] = [];
 
-const DEFAULT_BANK_ACCOUNTS: BankAccount[] = [
-  { id: 'bnk-ahmad', userId: 'acc-ahmad', accountHolderName: 'Ahmad bin Rosli', bankName: 'Maybank', accountNumber: '164012345678', accountType: 'savings', isVerified: true, isDefault: true },
-  { id: 'bnk-sarah', userId: 'acc-sarah', accountHolderName: 'Sarah binti Ismail', bankName: 'CIMB Bank', accountNumber: '701234567890', accountType: 'savings', isVerified: true, isDefault: true },
-  { id: 'bnk-kamal', userId: 'acc-kamal', accountHolderName: 'Kamal bin Ariffin', bankName: 'Public Bank', accountNumber: '302456782', accountType: 'current', isVerified: true, isDefault: true }
-];
+const DEFAULT_BANK_ACCOUNTS: BankAccount[] = [];
 
-const DEFAULT_AFFILIATES: Affiliate[] = [
-  {
-    id: 'aff-ahmad',
-    userId: 'acc-ahmad',
-    name: 'Ahmad bin Rosli',
-    email: 'ahmad.rosli@example.my',
-    whatsapp: '+60112345678',
-    code: 'AHMAD10',
-    signupDate: '2026-04-10',
-    tier: 'Bronze',
-    unitsSold: 22,
-    lifetimeSales: 2420,
-    lifetimeCommissions: 242,
-    bankAccountId: 'bnk-ahmad'
-  },
-  {
-    id: 'aff-sarah',
-    userId: 'acc-sarah',
-    name: 'Sarah binti Ismail',
-    email: 'sarah.ismail@example.my',
-    whatsapp: '+60198765432',
-    code: 'SARAH15',
-    signupDate: '2026-03-12',
-    tier: 'Silver',
-    unitsSold: 85,
-    lifetimeSales: 11050,
-    lifetimeCommissions: 1657.5,
-    bankAccountId: 'bnk-sarah'
-  }
-];
+const DEFAULT_AFFILIATES: Affiliate[] = [];
 
-const DEFAULT_AGENTS: Agent[] = [
-  {
-    id: 'agt-kamal',
-    userId: 'acc-kamal',
-    agentTier: 'Gold',
-    initialStockPurchase: 15000,
-    stockBalance: 176,
-    stockAllocated: 176,
-    discountRate: 0.40,
-    commissionRate: 0.25,
-    maxInventory: -1, // Unlimited
-    bankAccountId: 'bnk-kamal',
-    verifiedAt: '2026-01-01T11:00:00Z'
-  }
-];
+const DEFAULT_AGENTS: Agent[] = [];
 
-const DEFAULT_STOCK_LOGS: AgentStockLog[] = [
-  {
-    id: 'log-1',
-    agentId: 'agt-kamal',
-    productId: 'p1',
-    quantity: 100,
-    action: 'purchase',
-    transactionId: 'txn-initial-gold',
-    notes: 'Initial Tier Gold Purchase Bundle allocation.',
-    createdAt: '2026-01-01T10:30:00Z'
-  },
-  {
-    id: 'log-2',
-    agentId: 'agt-kamal',
-    productId: 'p2',
-    quantity: 76,
-    action: 'purchase',
-    transactionId: 'txn-initial-gold',
-    notes: 'Initial Tier Gold Purchase Bundle allocation.',
-    createdAt: '2026-01-01T10:30:00Z'
-  }
-];
+const DEFAULT_STOCK_LOGS: AgentStockLog[] = [];
 
-const DEFAULT_BRANCHES: Branch[] = [
-  { id: 'b1', name: 'Pahang HQ (Kuantan)', state: 'Pahang', manager: 'Syed Al-Bukhary' },
-  { id: 'b2', name: 'Klang Valley Hub', state: 'Selangor', manager: 'Mastura Haris' },
-  { id: 'b3', name: 'Northern Branch (Penang)', state: 'Pulau Pinang', manager: 'Tan Wei Kiat' }
-];
+const DEFAULT_BRANCHES: Branch[] = [];
 
-const DEFAULT_CATEGORIES: ProductCategory[] = [
-  { id: 'c1', categoryName: 'Madu Tualang', description: 'Rare, unprocessed wild forest honey harvested from giant Tualang trees deep in the Malaysian rainforest.', displayOrder: 1, isActive: true },
-  { id: 'c2', categoryName: 'Virgin Coconut Oil', description: 'Premium cold-pressed virgin coconut oil, rich in medium-chain fatty acids for dietary health and cooking.', displayOrder: 2, isActive: true }
-];
+const DEFAULT_CATEGORIES: ProductCategory[] = [];
 
-const DEFAULT_SUPPLIERS: ProductSupplier[] = [
-  { id: 's1', supplierName: 'Suku Semelai Harvesters (Pahang)', contactPerson: 'Tok Batin Roslan', email: 'harvesters@pahangwild.org.my', phone: '+6019-3318855', address: 'Kampung Orang Asli Sungai Miang, Pekan, Pahang', paymentTerms: 'COD', minOrderQuantity: 10, leadTimeDays: 7, isActive: true },
-  { id: 's2', supplierName: 'Lipis Gold Rainforest Honey Group', contactPerson: 'Uncle Rahim', email: 'rahim@lipisgold.com.my', phone: '+6013-3334112', address: 'Kuala Lipis, Pahang', paymentTerms: 'Net 30', minOrderQuantity: 5, leadTimeDays: 5, isActive: true }
-];
+const DEFAULT_SUPPLIERS: ProductSupplier[] = [];
 
-const DEFAULT_INVENTORY: InventoryItem[] = [
-  // Product 1 (Madu Tualang Genting) across warehouses b1, b2, b3
-  { id: 'inv-1', productId: 'p1', warehouseId: 'b1', quantityOnHand: 120, quantityReserved: 0, quantityAvailable: 120, reorderLevel: 50, reorderQuantity: 100, batchNumber: 'BATCH-2024-0156', expiryDate: '2026-06-15', manufactureDate: '2024-06-15' },
-  { id: 'inv-2', productId: 'p1', warehouseId: 'b2', quantityOnHand: 65, quantityReserved: 0, quantityAvailable: 65, reorderLevel: 30, reorderQuantity: 50, batchNumber: 'BATCH-2024-0156', expiryDate: '2026-06-15', manufactureDate: '2024-06-15' },
-  { id: 'inv-3', productId: 'p1', warehouseId: 'b3', quantityOnHand: 25, quantityReserved: 0, quantityAvailable: 25, reorderLevel: 20, reorderQuantity: 30, batchNumber: 'BATCH-2024-0125', expiryDate: '2026-03-01', manufactureDate: '2024-03-01', isLowStock: true },
-  
-  // Product 2 (Madu Tualang Lipis) across warehouses b1, b2, b3
-  { id: 'inv-4', productId: 'p2', warehouseId: 'b1', quantityOnHand: 80, quantityReserved: 0, quantityAvailable: 80, reorderLevel: 40, reorderQuantity: 80, batchNumber: 'BATCH-2024-0145', expiryDate: '2026-06-01', manufactureDate: '2024-06-01' },
-  { id: 'inv-5', productId: 'p2', warehouseId: 'b2', quantityOnHand: 45, quantityReserved: 0, quantityAvailable: 45, reorderLevel: 20, reorderQuantity: 40, batchNumber: 'BATCH-2024-0145', expiryDate: '2026-06-01', manufactureDate: '2024-06-01' },
-  { id: 'inv-6', productId: 'p2', warehouseId: 'b3', quantityOnHand: 15, quantityReserved: 0, quantityAvailable: 15, reorderLevel: 20, reorderQuantity: 30, batchNumber: 'BATCH-2024-0145', expiryDate: '2026-06-01', manufactureDate: '2024-06-01', isLowStock: true }
-];
+const DEFAULT_INVENTORY: InventoryItem[] = [];
 
-const DEFAULT_STOCK_MOVEMENTS: StockMovement[] = [
-  { id: 'mv-1', productId: 'p1', warehouseId: 'b1', movementType: 'stock_in', quantity: 120, reason: 'Initial Batch Seeding', referenceNumber: 'PO-2026-0001', notes: 'HQ stock baseline allocation.', createdBy: 'acc-admin', createdAt: '2026-01-01T10:00:00Z' },
-  { id: 'mv-2', productId: 'p1', warehouseId: 'b2', movementType: 'transfer_in', quantity: 65, reason: 'Branch Distribution', referenceNumber: 'TRF-2026-0001', notes: 'Dispatched to Klang Valley.', fromWarehouseId: 'b1', toWarehouseId: 'b2', createdBy: 'acc-admin', createdAt: '2026-01-05T14:30:00Z' },
-  { id: 'mv-3', productId: 'p1', warehouseId: 'b3', movementType: 'transfer_in', quantity: 25, reason: 'Branch Redistribution', referenceNumber: 'TRF-2026-0002', notes: 'Dispatched to Penang.', fromWarehouseId: 'b1', toWarehouseId: 'b3', createdBy: 'acc-admin', createdAt: '2026-01-10T11:20:00Z' }
-];
+const DEFAULT_STOCK_MOVEMENTS: StockMovement[] = [];
 
-const DEFAULT_STOCK_ALERTS: StockAlert[] = [
-  { id: 'al-1', productId: 'p1', warehouseId: 'b3', alertType: 'low_stock', currentQuantity: 25, thresholdValue: 20, isResolved: false, createdAt: '2026-06-18T10:00:00Z' },
-  { id: 'al-2', productId: 'p2', warehouseId: 'b3', alertType: 'low_stock', currentQuantity: 15, thresholdValue: 20, isResolved: false, createdAt: '2026-06-19T08:00:00Z' }
-];
+const DEFAULT_STOCK_ALERTS: StockAlert[] = [];
 
-const DEFAULT_PRICING_HISTORY: ProductPricingHistory[] = [
-  { id: 'prh-1', productId: 'p1', oldPrice: 110, newPrice: 120, changeReason: 'Harvest Season Shortage & Canopy Scaling Costs', effectiveDate: '2026-03-01T00:00:00Z', changedBy: 'acc-admin', createdAt: '2026-03-01T00:00:00Z' }
-];
+const DEFAULT_PRICING_HISTORY: ProductPricingHistory[] = [];
 
-const DEFAULT_VARIANTS: ProductVariant[] = [
-  { id: 'v-1', parentProductId: 'p1', variantSku: 'MAD-TU-500', variantName: 'Volume Bottle', variantValue: '500g', additionalPrice: 0 }
-];
+const DEFAULT_VARIANTS: ProductVariant[] = [];
 
-const DEFAULT_ORDERS: Order[] = [
-  {
-    id: 'ord-1001',
-    customerName: 'Lee Chong Wei',
-    customerEmail: 'chongwei@example.com',
-    customerPhone: '+60124445555',
-    shippingAddress: 'A-12-3, Vista Kondo, Ampang, Selangor',
-    branchId: 'b2',
-    items: [
-      { productId: 'p2', productName: 'Madu Tualang Lipis - Premium Black Honey', quantity: 2, price: 150 }
-    ],
-    total: 300,
-    referralCode: 'SARAH15',
-    affiliateCommission: 45,
-    affiliateId: 'aff-sarah',
-    commissionPaid: true,
-    paymentStatus: 'Paid',
-    fulfillmentStatus: 'Shipped',
-    createdAt: '2026-06-18T10:30:00Z'
-  }
-];
+const DEFAULT_ORDERS: Order[] = [];
 
 const DEFAULT_CMS_CONFIG: WebsiteConfig = {
   siteName: 'Madu Plus Tualang',
-  siteDescription: 'Direct, premium raw wild Tualang Honey. Authentic jungle curation & modern affiliate structure.',
+  siteDescription: 'Direct, premium raw wild Tualang Honey.',
   logoUrl: '',
-  primaryColor: '#EE4D2D',
-  secondaryColor: '#C0392B',
-  contactPhone: '+6011-223344',
-  contactEmail: 'hq@maduplus.my',
-  facebookLink: 'https://fb.com/maduplus',
-  instagramLink: 'https://instagram.com/maduplus'
+  primaryColor: '#1580c2',
+  secondaryColor: '#64748b',
+  contactPhone: '',
+  contactEmail: '',
+  facebookLink: '',
+  instagramLink: ''
 };
 
-const DEFAULT_CMS_PAGES: WebsitePage[] = [
-  {
-    id: 'page-about',
-    slug: 'about',
-    title: 'Pure Harvesting Legacy',
-    content: `### Sourced Direct From Tualang Giants\n\nUnlike commercially farm-raised honey, **Madu Plus** is strictly hand-harvested by veteran climbers scaling 80-meter high Tualang trees (**Koompassia excelsa**) in Pahang tropical woodlands. Our hunters extract the raw wild honey in limited quantities, maintaining the highest bio-active nutrients possible.\n\n### Benefits of Wild Tualang Honey\n\n* **Anti-Bacterial Core:** Combats winter cold and cough naturally.\n* **Lower Glycemic Impact:** Perfect substitute for table sugars.\n* **Antioxidant Enriched:** Contains high organic phenolic acid structures.\n\nEnjoy pure nectar, unfiltered, direct from nature's canopy.`,
-    published: true,
-    updatedAt: '2026-06-21T00:00:00Z'
-  }
-];
+const DEFAULT_CMS_PAGES: WebsitePage[] = [];
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Offline-first LocalStorage Hydrators
@@ -459,6 +300,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
 
+  const [recruitmentInvites, setRecruitmentInvites] = useState<RecruitmentInvite[]>(() => {
+    const saved = localStorage.getItem('mp_recruitment_invites');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  const [campaigns, setCampaigns] = useState<Campaign[]>(() => {
+    const saved = localStorage.getItem('mp_campaigns');
+    return saved ? JSON.parse(saved) : [];
+  });
+
   // Advanced Product & Inventory States
   const [inventory, setInventory] = useState<InventoryItem[]>(() => {
     const saved = localStorage.getItem('mp_inventory_items');
@@ -512,11 +363,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [referralCode, setReferralCode] = useState<string | null>(() => {
-    return localStorage.getItem('mp_referral_code');
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const urlRef = params.get('ref');
+      if (urlRef) {
+        localStorage.setItem('mp_referral_code', urlRef);
+        localStorage.setItem('MP_referral_code', urlRef);
+        return urlRef;
+      }
+    }
+    return localStorage.getItem('mp_referral_code') || localStorage.getItem('MP_referral_code');
   });
 
   const [selectedBranchId, setSelectedBranchId] = useState<string>(() => {
-    return DEFAULT_BRANCHES[0].id;
+    return DEFAULT_BRANCHES[0]?.id || '';
   });
 
   const [language, setLanguageState] = useState<'en' | 'ms'>(() => {
@@ -524,7 +384,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return (saved === 'en' || saved === 'ms') ? saved : 'en';
   });
 
-  const [branches] = useState<Branch[]>(DEFAULT_BRANCHES);
+  const [branches, setBranches] = useState<Branch[]>(() => {
+    const saved = localStorage.getItem('mp_branches');
+    return saved ? JSON.parse(saved) : DEFAULT_BRANCHES;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('mp_branches', JSON.stringify(branches));
+  }, [branches]);
   
   // Supabase states
   const [supabaseLoading, setSupabaseLoading] = useState<boolean>(true);
@@ -541,7 +408,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const [
           dbProducts, dbAffiliates, dbOrders, dbAccounts, 
           dbProfiles, dbAddresses, dbBankAccounts, 
-          dbAgents, dbLogs, dbConfig, dbPages, dbAudit
+          dbAgents, dbLogs, dbConfig, dbPages, dbAudit,
+          dbInvites, dbCampaigns
         ] = await Promise.all([
           supabaseDb.getProducts(),
           supabaseDb.getAffiliates(),
@@ -554,7 +422,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           supabaseDb.getAgentStockLogs(),
           supabaseDb.getWebsiteConfig(),
           supabaseDb.getWebsitePages(),
-          supabaseDb.getAuditLogs()
+          supabaseDb.getAuditLogs(),
+          supabaseDb.getRecruitmentInvites(),
+          supabaseDb.getCampaigns()
         ]);
         
         let connectedCount = 0;
@@ -570,6 +440,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (dbConfig !== null) { setWebsiteConfig(dbConfig); connectedCount++; }
         if (dbPages !== null) { setWebsitePages(dbPages); connectedCount++; }
         if (dbAudit !== null) { setAuditLogs(dbAudit); connectedCount++; }
+        if (dbInvites !== null) { setRecruitmentInvites(dbInvites); connectedCount++; }
+        if (dbCampaigns !== null) { setCampaigns(dbCampaigns); connectedCount++; }
         
         if (connectedCount > 0) {
           setSupabaseConnected(true);
@@ -603,6 +475,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => { localStorage.setItem('mp_variants', JSON.stringify(variants)); }, [variants]);
   useEffect(() => { localStorage.setItem('mp_suppliers', JSON.stringify(suppliers)); }, [suppliers]);
   useEffect(() => { localStorage.setItem('mp_categories', JSON.stringify(categories)); }, [categories]);
+  useEffect(() => { localStorage.setItem('mp_recruitment_invites', JSON.stringify(recruitmentInvites)); }, [recruitmentInvites]);
+  useEffect(() => { localStorage.setItem('mp_campaigns', JSON.stringify(campaigns)); }, [campaigns]);
   useEffect(() => {
     if (currentUserAccount) {
       localStorage.setItem('mp_current_account', JSON.stringify(currentUserAccount));
@@ -757,7 +631,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     const uniqueCode = 'AFX' + Math.random().toString(36).substring(2, 8).toUpperCase();
-    const newAccId = `acc-aff-${Date.now().toString().slice(-4)}`;
+    const uniqueToken = Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 6).toUpperCase();
+    const newAccId = `acc-aff-${uniqueToken}`;
     
     const newAcc: UserAccount = {
       id: newAccId,
@@ -771,7 +646,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const dob = extractDOBFromIC(fields.ic);
 
     const newProf: UserProfile = {
-      id: `prof-aff-${Date.now().toString().slice(-4)}`,
+      id: `prof-aff-${uniqueToken}`,
       userId: newAccId,
       fullName: fields.name,
       icNumber: fields.ic,
@@ -782,7 +657,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     const newAddr: UserAddress = {
-      id: `adr-aff-${Date.now().toString().slice(-4)}`,
+      id: `adr-aff-${uniqueToken}`,
       userId: newAccId,
       addressType: 'both',
       fullAddress: fields.address,
@@ -794,7 +669,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     const newBank: BankAccount = {
-      id: `bnk-aff-${Date.now().toString().slice(-4)}`,
+      id: `bnk-aff-${uniqueToken}`,
       userId: newAccId,
       accountHolderName: fields.holderName || fields.name,
       bankName: fields.bankName,
@@ -804,8 +679,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isDefault: true
     };
 
+    // Check referral code
+    let recruitedBy: string | undefined = undefined;
+    const activeRefCode = referralCode || localStorage.getItem('mp_referral_code') || localStorage.getItem('MP_referral_code');
+    if (activeRefCode) {
+      const upline = affiliates.find(a => a.code.toUpperCase() === activeRefCode.toUpperCase());
+      if (upline) {
+        recruitedBy = upline.id;
+        // update the upline affiliate's stats: conversions + 1
+        setAffiliates(prev => {
+          const nextAffs = prev.map(a => {
+            if (a.id === upline.id) {
+              const updatedUpline = { ...a, conversions: (a.conversions || 0) + 1 };
+              if (isSupabaseConfigured) {
+                supabaseDb.upsertAffiliates([updatedUpline]).catch(e => {
+                  console.error("Failed to update upline conversions in Supabase:", e);
+                });
+              }
+              return updatedUpline;
+            }
+            return a;
+          });
+          localStorage.setItem('mp_affiliates', JSON.stringify(nextAffs));
+          return nextAffs;
+        });
+        addAuditLog('Referral Attribution', 'affiliates', upline.id, `Attributed conversion from new registration under code ${activeRefCode}`);
+      }
+    }
+
     const newAff: Affiliate = {
-      id: `aff-${Date.now().toString().slice(-4)}`,
+      id: `aff-${uniqueToken}`,
       userId: newAccId,
       name: fields.name,
       email: cleanEmail,
@@ -816,7 +719,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unitsSold: 0,
       lifetimeSales: 0,
       lifetimeCommissions: 0,
-      bankAccountId: newBank.id
+      bankAccountId: newBank.id,
+      recruitedBy: recruitedBy
     };
 
     setUserAccounts(prev => [...prev, newAcc]);
@@ -879,7 +783,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       maxInv = -1; // Unlimited
     }
 
-    const newAccId = `acc-agt-${Date.now().toString().slice(-4)}`;
+    const uniqueToken = Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 6).toUpperCase();
+    const newAccId = `acc-agt-${uniqueToken}`;
+    
     const newAcc: UserAccount = {
       id: newAccId,
       email: cleanEmail,
@@ -891,7 +797,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const dob = extractDOBFromIC(fields.ic);
 
     const newProf: UserProfile = {
-      id: `prof-agt-${Date.now().toString().slice(-4)}`,
+      id: `prof-agt-${uniqueToken}`,
       userId: newAccId,
       fullName: fields.name,
       icNumber: fields.ic,
@@ -902,7 +808,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     const newAddr: UserAddress = {
-      id: `adr-agt-${Date.now().toString().slice(-4)}`,
+      id: `adr-agt-${uniqueToken}`,
       userId: newAccId,
       addressType: 'both',
       fullAddress: fields.address,
@@ -914,7 +820,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     const newBank: BankAccount = {
-      id: `bnk-agt-${Date.now().toString().slice(-4)}`,
+      id: `bnk-agt-${uniqueToken}`,
       userId: newAccId,
       accountHolderName: fields.holderName || fields.name,
       bankName: fields.bankName,
@@ -924,7 +830,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isDefault: true
     };
 
-    const agtId = `agt-${Date.now().toString().slice(-4)}`;
+    // Check referral code
+    let recruitedBy: string | undefined = undefined;
+    const activeRefCode = referralCode || localStorage.getItem('mp_referral_code') || localStorage.getItem('MP_referral_code');
+    if (activeRefCode) {
+      const upline = affiliates.find(a => a.code.toUpperCase() === activeRefCode.toUpperCase());
+      if (upline) {
+        recruitedBy = upline.id;
+        // update the upline affiliate's stats: conversions + 1
+        setAffiliates(prev => {
+          const nextAffs = prev.map(a => {
+            if (a.id === upline.id) {
+              const updatedUpline = { ...a, conversions: (a.conversions || 0) + 1 };
+              if (isSupabaseConfigured) {
+                supabaseDb.upsertAffiliates([updatedUpline]).catch(e => {
+                  console.error("Failed to update upline conversions in Supabase:", e);
+                });
+              }
+              return updatedUpline;
+            }
+            return a;
+          });
+          localStorage.setItem('mp_affiliates', JSON.stringify(nextAffs));
+          return nextAffs;
+        });
+        addAuditLog('Referral Attribution', 'affiliates', upline.id, `Attributed conversion from new registration under code ${activeRefCode}`);
+      }
+    }
+
+    const agtId = `agt-${uniqueToken}`;
     const newAgent: Agent = {
       id: agtId,
       userId: newAccId,
@@ -936,12 +870,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       commissionRate: comm,
       maxInventory: maxInv,
       bankAccountId: newBank.id,
-      verifiedAt: new Date().toISOString()
+      verifiedAt: new Date().toISOString(),
+      recruitedBy: recruitedBy
     };
 
     // Create Initial stock log transaction
     const initialLog: AgentStockLog = {
-      id: `log-agt-${Date.now().toString().slice(-4)}`,
+      id: `log-agt-${uniqueToken}`,
       agentId: agtId,
       productId: 'p1', // Sourced to default raw wild honey
       quantity: initialBtls,
@@ -1593,7 +1528,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     setInventory(prev => {
-      const newItems = DEFAULT_BRANCHES.map(branch => ({
+      const newItems = branches.map(branch => ({
         id: `inv-${Date.now()}-${branch.id}-${Math.floor(Math.random()*1000)}`,
         productId: product.id,
         warehouseId: branch.id,
@@ -1720,7 +1655,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     setInventory(prev => {
-      const newSlots = DEFAULT_BRANCHES.map(branch => {
+      const newSlots = branches.map(branch => {
         const matchingOrigSlot = inventory.find(slot => slot.productId === id && slot.warehouseId === branch.id);
         const stockQty = (copyFlags.stock && matchingOrigSlot) ? matchingOrigSlot.quantityOnHand : 0;
         return {
@@ -1956,6 +1891,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addAuditLog('Add Agent', 'agents', agt.id, JSON.stringify(agt));
   };
 
+  const addRecruitmentInvite = async (invite: Omit<RecruitmentInvite, 'id' | 'createdAt'>): Promise<RecruitmentInvite> => {
+    const newInvite: RecruitmentInvite = {
+      ...invite,
+      id: `inv-${Date.now().toString(36)}`,
+      createdAt: new Date().toISOString()
+    };
+    setRecruitmentInvites(prev => {
+      const updated = [newInvite, ...prev];
+      return updated;
+    });
+    if (isSupabaseConfigured) {
+      await supabaseDb.upsertRecruitmentInvites([newInvite]).catch(e => {
+        console.error("Failed to upsert recruitment invite to Supabase:", e);
+      });
+    }
+    addAuditLog('Recruitment Invite Created', 'recruitment_invites', newInvite.id, JSON.stringify(invite));
+    return newInvite;
+  };
+
+  const addCampaign = async (campaign: Omit<Campaign, 'id' | 'createdAt'>): Promise<Campaign> => {
+    const newCampaign: Campaign = {
+      ...campaign,
+      id: `cmp-${Date.now().toString(36)}`,
+      createdAt: new Date().toISOString()
+    };
+    setCampaigns(prev => {
+      const updated = [newCampaign, ...prev];
+      return updated;
+    });
+    if (isSupabaseConfigured) {
+      await supabaseDb.upsertCampaigns([newCampaign]).catch(e => {
+        console.error("Failed to upsert campaign to Supabase:", e);
+      });
+    }
+    addAuditLog('Campaign Broadcast Created', 'campaigns', newCampaign.id, JSON.stringify(campaign));
+    return newCampaign;
+  };
+
   const resetToDefaults = () => {
     setUserAccounts(DEFAULT_ACCOUNTS);
     setUserProfiles(DEFAULT_PROFILES);
@@ -1975,11 +1948,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setVariants(DEFAULT_VARIANTS);
     setSuppliers(DEFAULT_SUPPLIERS);
     setCategories(DEFAULT_CATEGORIES);
+    setBranches(DEFAULT_BRANCHES);
     setCurrentUserAccount(null);
     setCurrentUserProfile(null);
     setCart([]);
     setReferralCode(null);
-    setSelectedBranchId(DEFAULT_BRANCHES[0].id);
+    setSelectedBranchId(DEFAULT_BRANCHES[0]?.id || '');
 
     // Wipe cached items
     const keys = [
@@ -1987,7 +1961,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       'mp_affiliates', 'mp_agents', 'mp_stock_logs', 'mp_orders', 'mp_website_config',
       'mp_website_pages', 'mp_current_account', 'mp_current_profile', 'mp_cart', 'mp_referral_code',
       'mp_inventory_items', 'mp_stock_movements', 'mp_stock_alerts', 'mp_pricing_history',
-      'mp_variants', 'mp_suppliers', 'mp_categories'
+      'mp_variants', 'mp_suppliers', 'mp_categories', 'mp_branches'
     ];
     keys.forEach(k => localStorage.removeItem(k));
 
@@ -2094,6 +2068,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateAgent,
         addAffiliate,
         addAgent,
+        recruitmentInvites,
+        campaigns,
+        addRecruitmentInvite,
+        addCampaign,
         resetToDefaults,
         seedSupabase
       }}

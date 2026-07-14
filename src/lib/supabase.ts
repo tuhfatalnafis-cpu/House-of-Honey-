@@ -16,7 +16,9 @@ import {
   AgentStockLog, 
   WebsiteConfig, 
   WebsitePage, 
-  AuditLog 
+  AuditLog,
+  RecruitmentInvite,
+  Campaign
 } from '../types';
 
 // Read config from Vite environment variables
@@ -204,6 +206,28 @@ CREATE TABLE IF NOT EXISTS admin_audit_log (
   created_at TEXT NOT NULL
 );
 
+-- 13. Recruitment Invites
+CREATE TABLE IF NOT EXISTS recruitment_invites (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL,
+  phone TEXT,
+  referrer_code TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL
+);
+
+-- 14. Broadcast Campaigns
+CREATE TABLE IF NOT EXISTS campaigns (
+  id TEXT PRIMARY KEY,
+  channel TEXT NOT NULL,
+  recipients TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  body TEXT,
+  count INT NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'Sent',
+  created_at TEXT NOT NULL
+);
+
 -- Enable Row Level Security (RLS) but allow anonymous access for sandbox MVP
 ALTER TABLE user_accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
@@ -217,6 +241,8 @@ ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE website_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE website_pages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE admin_audit_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE recruitment_invites ENABLE ROW LEVEL SECURITY;
+ALTER TABLE campaigns ENABLE ROW LEVEL SECURITY;
 
 -- Create Policies for open anonymous read/write access
 CREATE POLICY "Allow public select user_accounts" ON user_accounts FOR SELECT USING (true);
@@ -254,6 +280,12 @@ CREATE POLICY "Allow public all website_pages" ON website_pages FOR ALL USING (t
 
 CREATE POLICY "Allow public select admin_audit_log" ON admin_audit_log FOR SELECT USING (true);
 CREATE POLICY "Allow public all admin_audit_log" ON admin_audit_log FOR ALL USING (true);
+
+CREATE POLICY "Allow public select recruitment_invites" ON recruitment_invites FOR SELECT USING (true);
+CREATE POLICY "Allow public all recruitment_invites" ON recruitment_invites FOR ALL USING (true);
+
+CREATE POLICY "Allow public select campaigns" ON campaigns FOR SELECT USING (true);
+CREATE POLICY "Allow public all campaigns" ON campaigns FOR ALL USING (true);
 
 -- Insert a baseline layout page & CMS setting
 INSERT INTO website_config (id, site_name, site_description, primary_color, secondary_color, contact_email)
@@ -432,6 +464,30 @@ function mapAuditLog(row: any): AuditLog {
     targetType: row.target_type,
     targetId: row.target_id,
     changes: row.changes,
+    createdAt: row.created_at,
+  };
+}
+
+function mapRecruitmentInvite(row: any): RecruitmentInvite {
+  return {
+    id: row.id,
+    email: row.email,
+    phone: row.phone || undefined,
+    referrerCode: row.referrer_code || undefined,
+    status: row.status as 'pending' | 'registered' | 'expired',
+    createdAt: row.created_at,
+  };
+}
+
+function mapCampaign(row: any): Campaign {
+  return {
+    id: row.id,
+    channel: row.channel as 'email' | 'sms' | 'in_app',
+    recipients: row.recipients,
+    subject: row.subject,
+    body: row.body || undefined,
+    count: Number(row.count),
+    status: row.status,
     createdAt: row.created_at,
   };
 }
@@ -865,6 +921,68 @@ export const supabaseDb = {
         created_at: log.createdAt
       };
       const { error } = await supabase.from('admin_audit_log').insert([row]);
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  // RECRUITMENT INVITES
+  async getRecruitmentInvites(): Promise<RecruitmentInvite[] | null> {
+    if (!supabase) return null;
+    try {
+      const { data, error } = await supabase.from('recruitment_invites').select('*');
+      if (error) return null;
+      return data.map(mapRecruitmentInvite);
+    } catch {
+      return null;
+    }
+  },
+
+  async upsertRecruitmentInvites(invites: RecruitmentInvite[]): Promise<boolean> {
+    if (!supabase) return false;
+    try {
+      const rows = invites.map(i => ({
+        id: i.id,
+        email: i.email,
+        phone: i.phone || null,
+        referrer_code: i.referrerCode || null,
+        status: i.status,
+        created_at: i.createdAt,
+      }));
+      const { error } = await supabase.from('recruitment_invites').upsert(rows);
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  // BROADCAST CAMPAIGNS
+  async getCampaigns(): Promise<Campaign[] | null> {
+    if (!supabase) return null;
+    try {
+      const { data, error } = await supabase.from('campaigns').select('*');
+      if (error) return null;
+      return data.map(mapCampaign);
+    } catch {
+      return null;
+    }
+  },
+
+  async upsertCampaigns(campaignsList: Campaign[]): Promise<boolean> {
+    if (!supabase) return false;
+    try {
+      const rows = campaignsList.map(c => ({
+        id: c.id,
+        channel: c.channel,
+        recipients: c.recipients,
+        subject: c.subject,
+        body: c.body || null,
+        count: c.count,
+        status: c.status,
+        created_at: c.createdAt,
+      }));
+      const { error } = await supabase.from('campaigns').upsert(rows);
       return !error;
     } catch {
       return false;

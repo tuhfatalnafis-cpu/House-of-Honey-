@@ -5,7 +5,7 @@
 
 export type TierType = 'Bronze' | 'Silver' | 'Gold';
 export type UserType = 'customer' | 'affiliate' | 'agent' | 'admin';
-export type UserStatus = 'active' | 'suspended' | 'inactive' | 'pending_verification';
+export type UserStatus = 'active' | 'inactive' | 'suspended' | 'blacklisted' | 'pending_verification';
 
 export interface UserAccount {
   id: string;
@@ -195,36 +195,38 @@ export interface Affiliate {
   id: string;
   userId?: string;
   name: string;
-  email: string;
-  whatsapp: string;
-  code: string; // e.g., "TUALANG123"
-  signupDate: string;
+  email?: string;
+  whatsapp?: string;
+  code: string; // e.g., "TUALANG123", must be UNIQUE
+  signupDate?: string; // ISO
   tier: TierType;
   unitsSold: number;
   lifetimeSales: number;
   lifetimeCommissions: number;
   bankAccountId?: string;
-  status?: 'active' | 'inactive' | 'suspended' | 'blacklisted';
+  status?: UserStatus; // default 'active'
   recruitedBy?: string; // id of recruiter affiliate
   clicks?: number;
   conversions?: number;
   commissionOverride?: number; // Override percentage (e.g. 18.5)
   taxId?: string;
+  rank?: number;
+  createdAt?: string; // ISO
 }
 
 export interface Agent {
   id: string; // AGT---
-  userId: string;
-  agentTier: TierType;
-  initialStockPurchase: number;
+  userId?: string;
+  agentTier: TierType; // NOTE: agentTier, NOT tier
+  initialStockPurchase?: number;
   stockBalance: number;
-  stockAllocated: number;
-  discountRate: number; // e.g. 0.20, 0.30, 0.40
-  commissionRate: number; // e.g. 0.15, 0.20, 0.25
-  maxInventory: number; // e.g. 100, 500, -1 (unlimited)
+  stockAllocated?: number;
+  discountRate: number; // 0..1 wholesale discount
+  commissionRate: number; // 0..1
+  maxInventory: number; // 0 = unlimited
   bankAccountId?: string;
   verifiedAt?: string;
-  status?: 'active' | 'inactive' | 'suspended' | 'blacklisted';
+  status?: UserStatus; // default 'active'
   territory?: string;
   recruitedBy?: string;
   totalSalesVolume?: number;
@@ -260,19 +262,41 @@ export interface OrderItem {
 export interface Order {
   id: string;
   customerName: string;
-  customerEmail: string;
-  customerPhone: string;
-  shippingAddress: string;
-  branchId: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  shippingAddress?: string;
+  branchId?: string;
   items: OrderItem[];
   total: number;
   referralCode?: string;
   affiliateCommission?: number;
   affiliateId?: string;
   agentId?: string; // linked if agent purchased or fulfilled
-  commissionPaid: boolean;
-  paymentStatus: 'Pending' | 'Paid' | 'Failed';
+  commissionPaid?: boolean;
+  paymentStatus: 'Pending' | 'Paid' | 'Failed' | 'Refunded';
   fulfillmentStatus: 'Processing' | 'Shipped' | 'Delivered';
+  createdAt?: string;
+}
+
+// New — persisted recruitment invites
+export interface RecruitmentInvite {
+  id: string;
+  email: string;
+  phone?: string;
+  referrerCode?: string | null;       // upline affiliate code
+  status: 'pending' | 'registered' | 'expired';
+  createdAt: string;
+}
+
+// New — persisted broadcast campaigns
+export interface Campaign {
+  id: string;
+  channel: 'email' | 'sms' | 'in_app';
+  recipients: string;                 // human label e.g. "Gold Tier"
+  subject: string;
+  body?: string;
+  count: number;                      // recipients targeted
+  status: string;                     // 'Sent' | 'Copied to clipboard' | ...
   createdAt: string;
 }
 

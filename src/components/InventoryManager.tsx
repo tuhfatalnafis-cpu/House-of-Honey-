@@ -267,19 +267,19 @@ export const InventoryManager: React.FC = () => {
       const translatedName = getProductTranslation(p.id, 'name', language, p.name);
       const nameShort = translatedName.split('-')[0].trim();
       
-      const kajangStock = inventory.find(i => i.productId === p.id && i.warehouseId === 'b1')?.quantityOnHand || 0;
-      const klangStock = inventory.find(i => i.productId === p.id && i.warehouseId === 'b2')?.quantityOnHand || 0;
-      const penangStock = inventory.find(i => i.productId === p.id && i.warehouseId === 'b3')?.quantityOnHand || 0;
-
-      return {
+      const itemData: any = {
         name: nameShort,
-        'Pahang HQ': kajangStock,
-        'Klang Valley': klangStock,
-        'Penang Branch': penangStock,
         'Total stock': p.stock
       };
+
+      branches.forEach(b => {
+        const stock = inventory.find(i => i.productId === p.id && i.warehouseId === b.id)?.quantityOnHand || 0;
+        itemData[b.name] = stock;
+      });
+
+      return itemData;
     });
-  }, [products, inventory, language]);
+  }, [products, inventory, branches, language]);
 
   const pieChartData = useMemo(() => {
     const counts = products.reduce((acc, p) => {
@@ -290,7 +290,7 @@ export const InventoryManager: React.FC = () => {
     return Object.entries(counts).map(([name, value]) => ({ name, value }));
   }, [products]);
 
-  const categoryColors = ['#EE4D2D', '#2D9CDB', '#27AE60', '#F2994A'];
+  const categoryColors = ['#1580c2', '#64748b', '#0ea5e9', '#94a3b8'];
 
   // Filter products catalog
   const filteredProducts = useMemo(() => {
@@ -569,186 +569,202 @@ export const InventoryManager: React.FC = () => {
       )}
 
       {/* Corporate Multi-Warehouse Header with controls */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-5 rounded-3xl border border-gray-150">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-5 rounded-2xl border border-slate-200">
         <div>
           <div className="flex items-center gap-2">
-            <Boxes className="h-5 w-5 text-tomato-500 text-amber-600" />
-            <h2 className="text-sm font-black uppercase text-gray-900 tracking-wider">Shopee-Style Advanced Inventory Control</h2>
+            <Boxes className="h-5 w-5 text-[#1580c2]" />
+            <h2 className="text-base font-bold text-slate-900">Inventory</h2>
           </div>
-          <p className="text-[10px] text-gray-500 mt-0.5">Control SKUs, check multi-regional warehouse states, lodge batch transactions, and execute bulk automation overrides synchronously.</p>
+          <p className="text-xs text-slate-450 mt-1">Manage SKUs, warehouse stock levels, and batch movements.</p>
         </div>
         <div className="flex items-center gap-2 w-full md:w-auto">
           <button
             onClick={() => setShowMovementForm(true)}
-            className="flex-1 md:flex-none flex items-center justify-center gap-1.5 px-3 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 font-bold text-xs rounded-xl transition-all cursor-pointer"
+            className="flex-1 md:flex-none flex items-center justify-center gap-1.5 px-3 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-xs rounded-xl transition-all cursor-pointer bg-white"
           >
-            <ArrowRightLeft className="h-3.5 w-3.5" />
-            <span>Lodge Movement</span>
+            <ArrowRightLeft className="h-3.5 w-3.5 text-slate-500" />
+            <span>Record Movement</span>
           </button>
           <button
             onClick={handleAddNewProductClick}
-            className="flex-1 md:flex-none flex items-center justify-center gap-1.5 px-4.5 py-2 bg-amber-500 hover:bg-amber-600 font-bold text-xs text-white rounded-xl shadow-md transition-all cursor-pointer"
+            className="flex-1 md:flex-none flex items-center justify-center gap-1.5 px-4.5 py-2 bg-[#1580c2] hover:bg-[#116499] font-bold text-xs text-white rounded-xl shadow-sm transition-all cursor-pointer"
           >
             <Plus className="h-3.5 w-3.5" />
-            <span>Add New SKU</span>
+            <span>+ Add Product</span>
           </button>
         </div>
       </div>
 
       {/* Shopee Style Status Row KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-4 rounded-2xl bg-white border border-gray-150 flex items-center gap-4">
-          <div className="h-10 w-10 bg-orange-50 text-[#EE4D2D] rounded-xl flex items-center justify-center shrink-0">
+        <div className="p-5 rounded-2xl bg-white border border-slate-200 flex items-center gap-4 shadow-sm">
+          <div className="h-10 w-10 bg-[#1580c2]/10 text-[#1580c2] rounded-xl flex items-center justify-center shrink-0">
             <Package className="h-5 w-5" />
           </div>
           <div>
-            <span className="block text-[9px] font-bold text-gray-400 uppercase">Registered SKUs</span>
-            <span className="block text-base font-black font-mono text-gray-900 mt-0.5">{kpis.totalSkus} Products</span>
+            <span className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Registered SKUs</span>
+            <span className="block text-xl font-bold text-slate-900 mt-0.5">{kpis.totalSkus} Products</span>
           </div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-white border border-gray-150 flex items-center gap-4">
+        <div className="p-5 rounded-2xl bg-white border border-slate-200 flex items-center gap-4 shadow-sm">
           <div className="h-10 w-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center shrink-0">
             <Warehouse className="h-5 w-5" />
           </div>
           <div>
-            <span className="block text-[9px] font-bold text-gray-400 uppercase">Total Stock (HQ+Hubs)</span>
-            <span className="block text-base font-black font-mono text-emerald-700 mt-0.5">{kpis.totalStock} Units</span>
+            <span className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Total Stock (HQ+Hubs)</span>
+            <span className="block text-xl font-bold text-slate-900 mt-0.5">{kpis.totalStock} Units</span>
           </div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-white border border-gray-150 flex items-center gap-4">
+        <div className="p-5 rounded-2xl bg-white border border-slate-200 flex items-center gap-4 shadow-sm">
           <div className="h-10 w-10 bg-red-50 text-red-600 rounded-xl flex items-center justify-center shrink-0">
             <AlertTriangle className="h-5 w-5" />
           </div>
           <div>
-            <span className="block text-[9px] font-bold text-gray-400 uppercase">Low Stock Triggers</span>
-            <span className="block text-base font-black font-mono text-red-600 mt-0.5">{kpis.lowStockAlerts} Warning slots</span>
+            <span className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Low Stock Triggers</span>
+            <span className="block text-xl font-bold text-slate-900 mt-0.5">{kpis.lowStockAlerts} Warnings</span>
           </div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-white border border-gray-150 flex items-center gap-4">
+        <div className="p-5 rounded-2xl bg-white border border-slate-200 flex items-center gap-4 shadow-sm">
           <div className="h-10 w-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center shrink-0">
             <TrendingUp className="h-5 w-5" />
           </div>
           <div>
-            <span className="block text-[9px] font-bold text-gray-400 uppercase">Stock Valuation</span>
-            <span className="block text-base font-black font-mono text-blue-700 mt-0.5">RM {kpis.totalStockValueRM.toLocaleString()}</span>
+            <span className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Stock Valuation</span>
+            <span className="block text-xl font-bold text-slate-900 mt-0.5">RM {kpis.totalStockValueRM.toLocaleString()}</span>
           </div>
         </div>
       </div>
 
       {/* Shopee-style Admin Navigation Tabs */}
-      <div className="flex flex-wrap gap-1 border-b border-gray-200 bg-gray-50/50 p-1 rounded-2xl">
+      <div className="flex flex-nowrap overflow-x-auto gap-1 border-b border-slate-200 bg-slate-50/50 p-1.5 rounded-2xl">
         <button
           onClick={() => setInternalTab('overview')}
-          className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold uppercase rounded-xl transition-all cursor-pointer ${internalTab === 'overview' ? 'bg-[#EE4D2D] text-white shadow-md' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'}`}
+          className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer shrink-0 whitespace-nowrap ${internalTab === 'overview' ? 'bg-[#1580c2] text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'}`}
         >
           <BarChart2 className="h-3.5 w-3.5" />
-          <span>Dashboard & Charts</span>
+          <span>Dashboard</span>
         </button>
 
         <button
           onClick={() => setInternalTab('catalog')}
-          className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold uppercase rounded-xl transition-all cursor-pointer ${internalTab === 'catalog' ? 'bg-[#EE4D2D] text-white shadow-md' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'}`}
+          className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer shrink-0 whitespace-nowrap ${internalTab === 'catalog' ? 'bg-[#1580c2] text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'}`}
         >
           <Tag className="h-3.5 w-3.5" />
-          <span>All SKUs Catalog ({products.length})</span>
+          <span>Catalog ({products.length})</span>
         </button>
 
         <button
           onClick={() => setInternalTab('warehouses')}
-          className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold uppercase rounded-xl transition-all cursor-pointer ${internalTab === 'warehouses' ? 'bg-[#EE4D2D] text-white shadow-md' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'}`}
+          className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer shrink-0 whitespace-nowrap ${internalTab === 'warehouses' ? 'bg-[#1580c2] text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'}`}
         >
           <Building className="h-3.5 w-3.5" />
-          <span>Multi-Warehouse Levels</span>
+          <span>Warehouses</span>
         </button>
 
         <button
           onClick={() => setInternalTab('movements')}
-          className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold uppercase rounded-xl transition-all cursor-pointer ${internalTab === 'movements' ? 'bg-[#EE4D2D] text-white shadow-md' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'}`}
+          className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer shrink-0 whitespace-nowrap ${internalTab === 'movements' ? 'bg-[#1580c2] text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'}`}
         >
           <Activity className="h-3.5 w-3.5" />
-          <span>Movements Register ({stockMovements.length})</span>
+          <span>Movements ({stockMovements.length})</span>
         </button>
 
         <button
           onClick={() => setInternalTab('alerts')}
-          className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold uppercase rounded-xl transition-all cursor-pointer ${internalTab === 'alerts' ? 'bg-[#EE4D2D] text-white shadow-md' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'}`}
+          className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer shrink-0 whitespace-nowrap ${internalTab === 'alerts' ? 'bg-[#1580c2] text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'}`}
         >
           <AlertCircle className="h-3.5 w-3.5" />
-          <span>Batch & Expiry alerts ({stockAlerts.filter(a => !a.isResolved).length})</span>
+          <span>Batches ({stockAlerts.filter(a => !a.isResolved).length})</span>
         </button>
 
         <button
           onClick={() => setInternalTab('suppliers')}
-          className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold uppercase rounded-xl transition-all cursor-pointer ${internalTab === 'suppliers' ? 'bg-[#EE4D2D] text-white shadow-md' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'}`}
+          className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer shrink-0 whitespace-nowrap ${internalTab === 'suppliers' ? 'bg-[#1580c2] text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'}`}
         >
           <Truck className="h-3.5 w-3.5" />
-          <span>Suppliers Registry ({suppliers.length})</span>
+          <span>Suppliers ({suppliers.length})</span>
         </button>
 
         <button
           onClick={() => setInternalTab('bulk')}
-          className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold uppercase rounded-xl transition-all cursor-pointer ${internalTab === 'bulk' ? 'bg-[#EE4D2D] text-white shadow-md' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'}`}
+          className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer shrink-0 whitespace-nowrap ${internalTab === 'bulk' ? 'bg-[#1580c2] text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'}`}
         >
           <Sliders className="h-3.5 w-3.5" />
-          <span>Bulk Tools Toolbar</span>
+          <span>Bulk tools</span>
         </button>
       </div>
 
       {/* 1. OVERVIEW GRAPH TAB */}
       {internalTab === 'overview' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 bg-white p-5 rounded-3xl border border-gray-150">
+          <div className="lg:col-span-2 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
             <div className="flex justify-between items-center mb-4">
               <div>
-                <h3 className="text-xs font-bold text-gray-800 uppercase tracking-wider">Multi-Warehouse Station Distribution</h3>
-                <p className="text-[10px] text-gray-400 mt-0.5">Real-time comparison of stock quantities grouped by regional Malaysian branches.</p>
+                <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">Multi-Warehouse Station Distribution</h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">Stock quantities grouped by branch.</p>
               </div>
             </div>
 
-            <div className="h-72 w-full font-mono text-[11px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData} margin={{ top: 20, right: 10, left: -20, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="name" />
-                  <YAxis />
-                  <Tooltip formatter={(value) => [`${value} bottles`]} />
-                  <Legend />
-                  <Bar dataKey="Pahang HQ" fill="#EE4D2D" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="Klang Valley" fill="#2D9CDB" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="Penang Branch" fill="#27AE60" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+            <div className="h-72 w-full font-mono text-[11px] flex items-center justify-center">
+              {chartData.length === 0 || branches.length === 0 ? (
+                <div className="text-slate-400 text-xs py-10">No stock data yet. Please add products and configure branch locations.</div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData} margin={{ top: 20, right: 10, left: -20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                    <XAxis dataKey="name" stroke="#64748b" />
+                    <YAxis stroke="#64748b" />
+                    <Tooltip formatter={(value) => [`${value} bottles`]} />
+                    <Legend />
+                    {branches.map((b, idx) => {
+                      const colors = ['#1580c2', '#64748b', '#0ea5e9', '#94a3b8', '#38bdf8'];
+                      return (
+                        <Bar 
+                          key={b.id} 
+                          dataKey={b.name} 
+                          fill={colors[idx % colors.length]} 
+                          radius={[4, 4, 0, 0]} 
+                        />
+                      );
+                    })}
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </div>
 
           {/* Side stats breakdown */}
-          <div className="bg-white p-5 rounded-3xl border border-gray-150 flex flex-col justify-between">
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
             <div>
-              <h3 className="text-xs font-bold text-gray-800 uppercase tracking-wider">Stock Category Distribution</h3>
-              <p className="text-[10px] text-gray-400 mt-0.5 mb-4">Percentage allocation of product reserves in inventory.</p>
+              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">Stock Category Distribution</h3>
+              <p className="text-[11px] text-slate-400 mt-0.5 mb-4">Allocation of product reserves in inventory.</p>
               
               <div className="h-40 w-full flex items-center justify-center font-mono">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={pieChartData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={50}
-                      outerRadius={70}
-                      paddingAngle={5}
-                      dataKey="value"
-                    >
-                      {pieChartData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={categoryColors[index % categoryColors.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(v) => [`${v} bottles`]} />
-                  </PieChart>
-                </ResponsiveContainer>
+                {pieChartData.length === 0 ? (
+                  <div className="text-slate-400 text-xs text-center py-10">No categories or stocks yet.</div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={pieChartData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={50}
+                        outerRadius={70}
+                        paddingAngle={5}
+                        dataKey="value"
+                      >
+                        {pieChartData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={categoryColors[index % categoryColors.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(v) => [`${v} bottles`]} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                )}
               </div>
 
               <div className="space-y-2 mt-4 text-xs font-sans">
@@ -756,16 +772,16 @@ export const InventoryManager: React.FC = () => {
                   <div key={entry.name} className="flex justify-between items-center text-xs">
                     <div className="flex items-center gap-2">
                       <span className="w-3 h-3 rounded-full" style={{ backgroundColor: categoryColors[idx % categoryColors.length] }} />
-                      <span className="font-medium text-gray-700">{entry.name}</span>
+                      <span className="font-medium text-slate-700">{entry.name}</span>
                     </div>
-                    <span className="font-mono font-bold text-gray-900">{entry.value} bottles</span>
+                    <span className="font-mono font-bold text-slate-900">{entry.value} bottles</span>
                   </div>
                 ))}
               </div>
             </div>
 
-            <div className="mt-6 pt-4 border-t border-gray-100 text-xs">
-              <div className="flex items-center gap-1 text-[#EE4D2D] font-bold">
+            <div className="mt-6 pt-4 border-t border-slate-100 text-xs">
+              <div className="flex items-center gap-1 text-[#1580c2] font-semibold">
                 <Info className="h-3.5 w-3.5" />
                 <span>Financial Forecast: RM {kpis.estimatedProfitRM.toLocaleString()} profit margin.</span>
               </div>
