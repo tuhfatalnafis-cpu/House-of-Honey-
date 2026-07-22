@@ -46,18 +46,25 @@ export const validateMalaysianIC = (ic: string): boolean => {
 };
 
 export const AuthWindow: React.FC<AuthWindowProps> = ({ onSuccess, initialMode = 'login' }) => {
-  const { login, registerCustomer, registerAffiliateEx, registerAgentEx } = useAppState();
+  const { login, setPassword, registerCustomer, registerAffiliateEx, registerAgentEx } = useAppState();
   const [mode, setMode] = useState<'login' | 'signup' | 'affiliate' | 'agent'>(initialMode);
-  
+
   // Alert logs
   const [errorStatus, setErrorStatus] = useState<string | null>(null);
   const [successStatus, setSuccessStatus] = useState<string | null>(null);
-  
+
   // Basic Fields
   const [email, setEmail] = useState('');
+  const [password, setPasswordValue] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [icNumber, setIcNumber] = useState('');
+
+  // First-login password claim flow, for accounts that predate password auth (e.g. admin-created accounts)
+  const [claimAccount, setClaimAccount] = useState<{ id: string; email: string } | null>(null);
+  const [claimPassword, setClaimPassword] = useState('');
+  const [claimConfirmPassword, setClaimConfirmPassword] = useState('');
   
   // Extra Fields for Affiliates & Agents
   const [whatsapp, setWhatsapp] = useState('');
@@ -77,23 +84,27 @@ export const AuthWindow: React.FC<AuthWindowProps> = ({ onSuccess, initialMode =
 
     try {
       if (mode === 'login') {
-        if (!email) return setErrorStatus('Email is required.');
-        const res = await login(email);
+        if (!email || !password) return setErrorStatus('Email and password are required.');
+        const res = await login(email, password);
         if (res.success) {
           setSuccessStatus(res.user?.userType === 'admin' ? 'Welcome back Admin!' : 'Successfully signed in!');
           setTimeout(() => {
             onSuccess();
           }, 1000);
+        } else if (res.needsPasswordSetup && res.user) {
+          setClaimAccount({ id: res.user.id, email: res.user.email });
         } else {
-          setErrorStatus(res.error || 'User not found.');
+          setErrorStatus(res.error || 'Invalid email or password.');
         }
-      } 
-      
+      }
+
       else if (mode === 'signup') {
-        if (!fullName || !email) {
-          return setErrorStatus('Full name and Email are required.');
+        if (!fullName || !email || !password) {
+          return setErrorStatus('Full name, email and password are required.');
         }
-        const res = await registerCustomer(fullName, email, phone);
+        if (password.length < 6) return setErrorStatus('Password must be at least 6 characters.');
+        if (password !== confirmPassword) return setErrorStatus('Passwords do not match.');
+        const res = await registerCustomer(fullName, email, phone, password);
         if (res.success) {
           setSuccessStatus('Customer profile registered successfully!');
           setTimeout(() => {
@@ -105,13 +116,15 @@ export const AuthWindow: React.FC<AuthWindowProps> = ({ onSuccess, initialMode =
       }
 
       else if (mode === 'affiliate') {
-        if (!fullName || !email || !icNumber || !whatsapp || !fullAddress || !bankAccountNo) {
+        if (!fullName || !email || !icNumber || !whatsapp || !fullAddress || !bankAccountNo || !password) {
           return setErrorStatus('Please fill in all required fields.');
         }
+        if (password.length < 6) return setErrorStatus('Password must be at least 6 characters.');
+        if (password !== confirmPassword) return setErrorStatus('Passwords do not match.');
         if (!validateMalaysianIC(icNumber)) {
           return setErrorStatus('Invalid Malaysian IC format. Must be YYMMDD-XX-XXXX (12 digits total).');
         }
-        
+
         const res = await registerAffiliateEx({
           name: fullName,
           email,
@@ -120,7 +133,8 @@ export const AuthWindow: React.FC<AuthWindowProps> = ({ onSuccess, initialMode =
           address: fullAddress,
           bankName,
           bankNo: bankAccountNo,
-          holderName: bankHolderName || fullName
+          holderName: bankHolderName || fullName,
+          password
         });
 
         if (res.success) {
@@ -134,9 +148,11 @@ export const AuthWindow: React.FC<AuthWindowProps> = ({ onSuccess, initialMode =
       }
 
       else if (mode === 'agent') {
-        if (!fullName || !email || !icNumber || !whatsapp || !fullAddress || !bankAccountNo) {
+        if (!fullName || !email || !icNumber || !whatsapp || !fullAddress || !bankAccountNo || !password) {
           return setErrorStatus('Please fill in all core fields to apply.');
         }
+        if (password.length < 6) return setErrorStatus('Password must be at least 6 characters.');
+        if (password !== confirmPassword) return setErrorStatus('Passwords do not match.');
         if (!validateMalaysianIC(icNumber)) {
           return setErrorStatus('Invalid MyKAD format verification failed.');
         }
@@ -150,7 +166,8 @@ export const AuthWindow: React.FC<AuthWindowProps> = ({ onSuccess, initialMode =
           bankName,
           bankNo: bankAccountNo,
           holderName: bankHolderName || fullName,
-          tier: selectedAgentTier
+          tier: selectedAgentTier,
+          password
         });
 
         if (res.success) {
@@ -167,56 +184,172 @@ export const AuthWindow: React.FC<AuthWindowProps> = ({ onSuccess, initialMode =
     }
   };
 
+  const handleClaimSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorStatus(null);
+    setSuccessStatus(null);
+    if (!claimAccount) return;
+
+    if (claimPassword.length < 6) return setErrorStatus('Password must be at least 6 characters.');
+    if (claimPassword !== claimConfirmPassword) return setErrorStatus('Passwords do not match.');
+
+    try {
+      const res = await setPassword(claimAccount.id, claimPassword);
+      if (res.success) {
+        setSuccessStatus('Password set! Signing you in...');
+        setTimeout(() => {
+          onSuccess();
+        }, 800);
+      } else {
+        setErrorStatus(res.error || 'Failed to set password.');
+      }
+    } catch (err: any) {
+      setErrorStatus(err.message || 'An unknown incident occurred.');
+    }
+  };
+
   return (
     <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100 max-w-lg mx-auto">
       {/* Header design config */}
       <div className="bg-gradient-to-r from-blue-700 to-[#1580c2] px-6 py-8 text-white relative">
-        <div className="absolute right-4 top-4 opacity-15">
+        <div className="absolute right-4 top-4 opacity-15 pointer-events-none">
           <Sparkles className="h-20 w-20" />
         </div>
         <h2 id="auth-title" className="font-sans text-2xl font-bold tracking-tight">
-          {mode === 'login' && 'Sign In Portal'}
-          {mode === 'signup' && 'Customer Account Registration'}
-          {mode === 'affiliate' && 'Register Affiliate Account'}
-          {mode === 'agent' && 'Apply as Official Agent'}
+          {claimAccount && 'Set Your Password'}
+          {!claimAccount && mode === 'login' && 'Sign In Portal'}
+          {!claimAccount && mode === 'signup' && 'Customer Account Registration'}
+          {!claimAccount && mode === 'affiliate' && 'Register Affiliate Account'}
+          {!claimAccount && mode === 'agent' && 'Apply as Official Agent'}
         </h2>
         <p className="font-sans text-xs text-blue-105 mt-1">
-          {mode === 'login' && 'Access your personalized Tualang Plus system dashboard'}
-          {mode === 'signup' && 'Create a simple retail shopper profile'}
-          {mode === 'affiliate' && 'Earn dynamic lifetime commissions through automated sharing links'}
-          {mode === 'agent' && 'Access tiered bulk pricing discounts with live micro-inventories'}
+          {claimAccount && 'This account has no password yet — set one to continue.'}
+          {!claimAccount && mode === 'login' && 'Access your personalized Tualang Plus system dashboard'}
+          {!claimAccount && mode === 'signup' && 'Create a simple retail shopper profile'}
+          {!claimAccount && mode === 'affiliate' && 'Earn dynamic lifetime commissions through automated sharing links'}
+          {!claimAccount && mode === 'agent' && 'Access tiered bulk pricing discounts with live micro-inventories'}
         </p>
 
-        {/* Dynamic Navigation Selectors */}
-        <div className="mt-6 flex flex-wrap gap-2 text-xs font-semibold">
-          <button 
-            onClick={() => { setMode('login'); setErrorStatus(null); }}
-            className={`px-3 py-1.5 rounded-lg transition-all ${mode === 'login' ? 'bg-white text-blue-700 shadow-sm' : 'bg-white/10 text-white hover:bg-white/20'}`}
-          >
-            Sign In
-          </button>
-          <button 
-            onClick={() => { setMode('signup'); setErrorStatus(null); }}
-            className={`px-3 py-1.5 rounded-lg transition-all ${mode === 'signup' ? 'bg-white text-blue-700 shadow-sm' : 'bg-white/10 text-white hover:bg-white/20'}`}
-          >
-            Customer Signup
-          </button>
-          <button 
-            onClick={() => { setMode('affiliate'); setErrorStatus(null); }}
-            className={`px-3 py-1.5 rounded-lg transition-all ${mode === 'affiliate' ? 'bg-white text-blue-700 shadow-sm' : 'bg-white/10 text-white hover:bg-white/20'}`}
-          >
-            Join Affiliate
-          </button>
-          <button 
-            onClick={() => { setMode('agent'); setErrorStatus(null); }}
-            className={`px-3 py-1.5 rounded-lg transition-all ${mode === 'agent' ? 'bg-white text-blue-700 shadow-sm' : 'bg-white/10 text-white hover:bg-white/20'}`}
-          >
-            Become Agent
-          </button>
-        </div>
+        {/* Dynamic Navigation Selectors — two-step: Sign In vs Create Account, then account type */}
+        {!claimAccount && (
+          <div className="mt-6 space-y-2.5">
+            <div className="grid grid-cols-2 gap-1 bg-white/10 p-1 rounded-xl text-xs font-bold">
+              <button
+                onClick={() => { setMode('login'); setErrorStatus(null); }}
+                className={`py-2 rounded-lg transition-all cursor-pointer ${mode === 'login' ? 'bg-white text-blue-700 shadow-sm' : 'text-white hover:bg-white/10'}`}
+              >
+                Sign In
+              </button>
+              <button
+                onClick={() => { if (mode === 'login') setMode('signup'); setErrorStatus(null); }}
+                className={`py-2 rounded-lg transition-all cursor-pointer ${mode !== 'login' ? 'bg-white text-blue-700 shadow-sm' : 'text-white hover:bg-white/10'}`}
+              >
+                Create Account
+              </button>
+            </div>
+
+            {mode !== 'login' && (
+              <div className="grid grid-cols-3 gap-1.5 text-[10px] font-bold uppercase tracking-wide animate-fade-in">
+                <button
+                  onClick={() => { setMode('signup'); setErrorStatus(null); }}
+                  className={`py-1.5 rounded-lg transition-all cursor-pointer ${mode === 'signup' ? 'bg-white/25 text-white ring-1 ring-white/40' : 'bg-white/5 text-blue-100 hover:bg-white/15'}`}
+                >
+                  Customer
+                </button>
+                <button
+                  onClick={() => { setMode('affiliate'); setErrorStatus(null); }}
+                  className={`py-1.5 rounded-lg transition-all cursor-pointer ${mode === 'affiliate' ? 'bg-white/25 text-white ring-1 ring-white/40' : 'bg-white/5 text-blue-100 hover:bg-white/15'}`}
+                >
+                  Affiliate
+                </button>
+                <button
+                  onClick={() => { setMode('agent'); setErrorStatus(null); }}
+                  className={`py-1.5 rounded-lg transition-all cursor-pointer ${mode === 'agent' ? 'bg-white/25 text-white ring-1 ring-white/40' : 'bg-white/5 text-blue-100 hover:bg-white/15'}`}
+                >
+                  Agent
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Form Content */}
+      {claimAccount ? (
+        <form onSubmit={handleClaimSubmit} className="p-6 space-y-4">
+          {errorStatus && (
+            <div className="flex items-start gap-2 bg-red-50 text-red-700 p-3 rounded-lg border border-red-100 text-xs text-left">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>{errorStatus}</span>
+            </div>
+          )}
+          {successStatus && (
+            <div className="flex items-start gap-2 bg-emerald-50 text-emerald-800 p-3 rounded-lg border border-emerald-100 text-xs text-left">
+              <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>{successStatus}</span>
+            </div>
+          )}
+
+          <div className="bg-blue-50 text-blue-900 border border-blue-100 p-3 rounded-lg text-xs">
+            No password is set yet for <strong>{claimAccount.email}</strong>. Choose one now to secure this account going forward.
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 mb-1">New Password</label>
+            <div className="relative">
+              <span className="absolute left-3 top-2.5 text-gray-400">
+                <Lock className="h-4 w-4" />
+              </span>
+              <input
+                type="password"
+                value={claimPassword}
+                onChange={(e) => setClaimPassword(e.target.value)}
+                placeholder="At least 6 characters"
+                className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-xs placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                required
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 mb-1">Confirm Password</label>
+            <div className="relative">
+              <span className="absolute left-3 top-2.5 text-gray-400">
+                <Lock className="h-4 w-4" />
+              </span>
+              <input
+                type="password"
+                value={claimConfirmPassword}
+                onChange={(e) => setClaimConfirmPassword(e.target.value)}
+                placeholder="Re-enter your password"
+                className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-xs placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                required
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            className="w-full mt-4 bg-[#1580c2] hover:bg-blue-700 text-white py-2.5 px-4 rounded-xl font-sans font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5"
+          >
+            <ShieldCheck className="h-4 w-4" />
+            Set Password & Sign In
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setClaimAccount(null);
+              setClaimPassword('');
+              setClaimConfirmPassword('');
+              setErrorStatus(null);
+              setSuccessStatus(null);
+            }}
+            className="w-full text-[10px] text-center text-gray-400 hover:text-gray-600"
+          >
+            Cancel
+          </button>
+        </form>
+      ) : (
       <form onSubmit={handleSubmit} className="p-6 space-y-4">
         {/* Alerts */}
         {errorStatus && (
@@ -260,21 +393,52 @@ export const AuthWindow: React.FC<AuthWindowProps> = ({ onSuccess, initialMode =
               <span className="absolute left-3 top-2.5 text-gray-400">
                 <Mail className="h-4 w-4" />
               </span>
-              <input 
-                type="email" 
+              <input
+                type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="e.g. user@example.my" 
+                placeholder="e.g. user@example.my"
                 className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-xs placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 required
               />
             </div>
-            {mode === 'login' && (
-              <p className="text-[10px] text-gray-400 mt-1">
-                Tip: Use <strong className="text-gray-600">asyraf@klinikara.com</strong> to access the Admin dashboard instantly.
-              </p>
-            )}
           </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 mb-1">Password</label>
+            <div className="relative">
+              <span className="absolute left-3 top-2.5 text-gray-400">
+                <Lock className="h-4 w-4" />
+              </span>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPasswordValue(e.target.value)}
+                placeholder={mode === 'login' ? 'Enter your password' : 'At least 6 characters'}
+                className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-xs placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                required
+              />
+            </div>
+          </div>
+
+          {mode !== 'login' && (
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1">Confirm Password</label>
+              <div className="relative">
+                <span className="absolute left-3 top-2.5 text-gray-400">
+                  <Lock className="h-4 w-4" />
+                </span>
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Re-enter your password"
+                  className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-xs placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  required
+                />
+              </div>
+            </div>
+          )}
 
           {mode === 'signup' && (
             <div>
@@ -487,7 +651,7 @@ export const AuthWindow: React.FC<AuthWindowProps> = ({ onSuccess, initialMode =
 
         {mode === 'login' ? (
           <p className="text-[10px] text-center text-gray-400 mt-2">
-            No registered credentials yet? Click on <strong className="text-blue-600 cursor-pointer" onClick={() => setMode('signup')}>Customer Signup</strong> above or apply for reseller status.
+            No registered credentials yet? Click on <strong className="text-blue-600 cursor-pointer" onClick={() => setMode('signup')}>Create Account</strong> above to sign up as a customer, affiliate, or agent.
           </p>
         ) : (
           <p className="text-[10px] text-center text-gray-400 mt-2">
@@ -495,6 +659,7 @@ export const AuthWindow: React.FC<AuthWindowProps> = ({ onSuccess, initialMode =
           </p>
         )}
       </form>
+      )}
     </div>
   );
 };

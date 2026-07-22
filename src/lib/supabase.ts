@@ -305,6 +305,7 @@ function mapUserAccount(row: any): UserAccount {
     email: row.email,
     userType: row.user_type,
     status: row.status,
+    passwordHash: row.password_hash || undefined,
     createdAt: row.created_at,
   };
 }
@@ -514,6 +515,7 @@ export const supabaseDb = {
         email: a.email,
         user_type: a.userType,
         status: a.status,
+        password_hash: a.passwordHash || null,
         created_at: a.createdAt,
       }));
       const { error } = await supabase.from('user_accounts').upsert(rows);

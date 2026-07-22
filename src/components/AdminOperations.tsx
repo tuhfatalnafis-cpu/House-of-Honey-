@@ -2383,7 +2383,7 @@ export const AdminOperations: React.FC = () => {
                                 onClick={() => {
                                   setSelectedAff(aff);
                                   setEditAffTier(aff.tier);
-                                  setEditAffStatus(aff.status || 'active');
+                                  setEditAffStatus(aff.status && aff.status !== 'pending_verification' ? aff.status : 'active');
                                   setEditAffOverride(aff.commissionOverride?.toString() || '');
                                   setShowAffModal(true);
                                 }}
@@ -3402,7 +3402,7 @@ export const AdminOperations: React.FC = () => {
                                 onClick={() => {
                                   setSelectedAgt(agt);
                                   setEditAgtTier(agt.agentTier);
-                                  setEditAgtStatus(agt.status || 'active');
+                                  setEditAgtStatus(agt.status && agt.status !== 'pending_verification' ? agt.status : 'active');
                                   setEditAgtTerritory(agt.territory || '');
                                   setShowAgtModal(true);
                                 }}
@@ -3605,7 +3605,7 @@ export const AdminOperations: React.FC = () => {
                             </td>
                             <td className="px-4 py-3 font-mono">RM {ord.total.toFixed(2)}</td>
                             <td className="px-4 py-3">
-                              <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${ord.fulfillmentStatus === 'delivered' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
+                              <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${ord.fulfillmentStatus === 'Delivered' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
                                 {ord.fulfillmentStatus}
                               </span>
                             </td>
@@ -4313,61 +4313,61 @@ export const AdminOperations: React.FC = () => {
                 </div>
               )}
 
-              {/* Custom Delete Confirmation Modal */}
-              {userToDeleteId && (() => {
-                const targetAcc = userAccounts.find(a => a.id === userToDeleteId);
-                const targetProfile = userProfiles.find(p => p.userId === userToDeleteId);
-                const nameText = targetProfile?.fullName || targetAcc?.email || 'this user';
-
-                return (
-                  <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-4 select-none">
-                    <div className="bg-white rounded-3xl border border-gray-150 w-full max-w-md shadow-2xl p-6 text-left space-y-4">
-                      <div className="flex items-center gap-3 text-red-600">
-                        <div className="p-2.5 bg-red-50 rounded-2xl">
-                          <Trash2 className="h-6 w-6" />
-                        </div>
-                        <h4 className="text-sm font-black uppercase tracking-tight font-sans">Confirm Permanent Erasure</h4>
-                      </div>
-
-                      <div className="space-y-2.5 text-xs text-gray-600">
-                        <p>
-                          Are you absolutely certain you want to delete <strong className="text-gray-900 font-extrabold">{nameText}</strong>?
-                        </p>
-                        <p className="bg-red-50 text-red-800 p-3 rounded-2xl border border-red-100 font-medium leading-relaxed">
-                          This action is <strong>irreversible</strong>. All of their data will be permanently wiped out, including:
-                        </p>
-                        <ul className="list-disc pl-5 space-y-1 font-semibold text-[11px]">
-                          <li>System Account Credentials & Login Details</li>
-                          <li>Representative Profiles & Certified MyKAD (IC) info</li>
-                          <li>Registered Delivery & Billing Addresses</li>
-                          <li>Linked Bank Savings Accounts</li>
-                          <li>Affiliate & Agent Distribution membership data</li>
-                        </ul>
-                      </div>
-
-                      <div className="flex gap-2.5 pt-2">
-                        <button
-                          onClick={confirmDeleteUser}
-                          className="flex-1 bg-red-600 hover:bg-red-700 text-white font-sans font-bold text-xs py-2.5 px-4 rounded-xl text-center shadow-md transition-colors cursor-pointer"
-                        >
-                          Yes, Erase Record
-                        </button>
-                        <button
-                          onClick={() => setUserToDeleteId(null)}
-                          className="flex-1 bg-slate-100 hover:bg-slate-200 text-gray-700 font-sans font-bold text-xs py-2.5 px-4 rounded-xl text-center transition-colors cursor-pointer"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
             </div>
           </div>
         );
       })()}
+
+        {/* Custom Delete Confirmation Modal — global, not tied to a specific admin subtab */}
+        {userToDeleteId && (() => {
+          const targetAcc = userAccounts.find(a => a.id === userToDeleteId);
+          const targetProfile = userProfiles.find(p => p.userId === userToDeleteId);
+          const nameText = targetProfile?.fullName || targetAcc?.email || 'this user';
+
+          return (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-4 select-none">
+              <div className="bg-white rounded-3xl border border-gray-150 w-full max-w-md shadow-2xl p-6 text-left space-y-4">
+                <div className="flex items-center gap-3 text-red-600">
+                  <div className="p-2.5 bg-red-50 rounded-2xl">
+                    <Trash2 className="h-6 w-6" />
+                  </div>
+                  <h4 className="text-sm font-black uppercase tracking-tight font-sans">Confirm Permanent Erasure</h4>
+                </div>
+
+                <div className="space-y-2.5 text-xs text-gray-600">
+                  <p>
+                    Are you absolutely certain you want to delete <strong className="text-gray-900 font-extrabold">{nameText}</strong>?
+                  </p>
+                  <p className="bg-red-50 text-red-800 p-3 rounded-2xl border border-red-100 font-medium leading-relaxed">
+                    This action is <strong>irreversible</strong>. All of their data will be permanently wiped out, including:
+                  </p>
+                  <ul className="list-disc pl-5 space-y-1 font-semibold text-[11px]">
+                    <li>System Account Credentials & Login Details</li>
+                    <li>Representative Profiles & Certified MyKAD (IC) info</li>
+                    <li>Registered Delivery & Billing Addresses</li>
+                    <li>Linked Bank Savings Accounts</li>
+                    <li>Affiliate & Agent Distribution membership data</li>
+                  </ul>
+                </div>
+
+                <div className="flex gap-2.5 pt-2">
+                  <button
+                    onClick={confirmDeleteUser}
+                    className="flex-1 bg-red-600 hover:bg-red-700 text-white font-sans font-bold text-xs py-2.5 px-4 rounded-xl text-center shadow-md transition-colors cursor-pointer"
+                  >
+                    Yes, Erase Record
+                  </button>
+                  <button
+                    onClick={() => setUserToDeleteId(null)}
+                    className="flex-1 bg-slate-100 hover:bg-slate-200 text-gray-700 font-sans font-bold text-xs py-2.5 px-4 rounded-xl text-center transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         </div>
       </div>

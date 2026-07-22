@@ -12,25 +12,30 @@ import { AdminOperations } from './components/AdminOperations';
 import { UserProfileWindow } from './components/UserProfileWindow';
 import { AgentDashboard } from './components/AgentDashboard';
 import { AuthWindow } from './components/AuthWindow';
+import { AdminLoginWindow } from './components/AdminLoginWindow';
+import { UpgradeAccountWindow } from './components/UpgradeAccountWindow';
 import { Cart } from './components/Cart';
-import { 
-  Home, 
-  Search, 
-  ShoppingCart, 
-  User, 
-  Award, 
-  ShieldAlert, 
-  Package, 
-  MapPin, 
-  KeyRound,
+import {
+  Home,
+  Search,
+  ShoppingCart,
+  User,
+  Award,
+  ShieldAlert,
+  Package,
+  MapPin,
   LogOut,
   ChevronRight,
   Sparkles
 } from 'lucide-react';
 
+// Admin sign-in is not linked anywhere in the public UI — reaching it requires this URL param,
+// known only to admins (e.g. bookmarked as https://yoursite/?hqadmin=1).
+const hasSecretAdminLink = () => typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('hqadmin');
+
 function MainLayout() {
-  const [currentTab, setCurrentTab] = useState<'home' | 'search' | 'cart' | 'account'>('home');
-  const [activeSubPanel, setActiveSubPanel] = useState<'affiliate' | 'agent' | 'admin' | 'profile_editor' | null>(null);
+  const [currentTab, setCurrentTab] = useState<'home' | 'search' | 'cart' | 'account'>(() => hasSecretAdminLink() ? 'account' : 'home');
+  const [activeSubPanel, setActiveSubPanel] = useState<'affiliate' | 'agent' | 'admin' | 'profile_editor' | null>(() => hasSecretAdminLink() ? 'admin' : null);
 
   const { 
     language, 
@@ -153,7 +158,7 @@ function MainLayout() {
                   
                   {/* High-fidelity Shopee Profile Banner Card */}
                   <div className="rounded-xl border border-gray-150 bg-gradient-to-tr from-slate-900 to-slate-800 text-white p-5 shadow-xs relative overflow-hidden">
-                    <div className="absolute right-[-15px] top-[-15px] text-7xl opacity-15">🍯</div>
+                    <div className="absolute right-[-15px] top-[-15px] text-7xl opacity-15 pointer-events-none">🍯</div>
                     
                     {currentUserAccount ? (
                       <div className="flex items-center justify-between gap-4">
@@ -293,8 +298,9 @@ function MainLayout() {
                       <ChevronRight className="h-4 w-4 text-gray-300" />
                     </button>
 
-                    {/* Button 4: HQ Operational Admin */}
-                    {currentUserAccount?.userType === 'admin' ? (
+                    {/* Button 4: HQ Operational Admin — only ever shown to accounts that are already admins.
+                        Non-admins never see this exists; the only way in is the secret ?hqadmin=1 URL. */}
+                    {currentUserAccount?.userType === 'admin' && (
                       <button
                         onClick={() => setActiveSubPanel('admin')}
                         className="w-full flex items-center justify-between p-2.5 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer text-left group"
@@ -312,27 +318,6 @@ function MainLayout() {
                             </div>
                             <p className="text-[10px] text-gray-400 leading-none mt-0.5">
                               {language === 'ms' ? 'Kelulusan kelayakan e-KYC bank & log pesanan' : 'Auditing, e-KYC verify & ledger settlements'}
-                            </p>
-                          </div>
-                        </div>
-                        <ChevronRight className="h-4 w-4 text-gray-300" />
-                      </button>
-                    ) : (
-                      // Hidden administrative backdoor teaser or restricted login trigger
-                      <button
-                        onClick={() => setActiveSubPanel('admin')}
-                        className="w-full flex items-center justify-between p-2.5 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer text-left group opacity-60"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="h-9 w-9 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center">
-                            <KeyRound className="h-4.5 w-4.5" />
-                          </div>
-                          <div>
-                            <p className="text-xs font-bold text-gray-900 group-hover:text-[#EE4D2D] transition-colors">
-                              {language === 'ms' ? 'Kebenaran Pentadbir HQ' : 'Admin Operations Center'}
-                            </p>
-                            <p className="text-[10px] text-gray-400 leading-none mt-0.5">
-                              {language === 'ms' ? 'Sistem pengesahan compliance & kelulusan KYC' : 'Audit logs & e-KYC certificates validation'}
                             </p>
                           </div>
                         </div>
@@ -382,7 +367,7 @@ function MainLayout() {
                               Daftar sebagai agen promosi berlesen! Kongsi kod sponsor anda sendiri, bantu pelanggan dapatkan madu tulen Pahang, & raih slab komisen 10% - 20% terus ke simpanan anda.
                             </p>
                           </div>
-                          <AuthWindow onSuccess={() => setActiveSubPanel('affiliate')} initialMode="affiliate" />
+                          <UpgradeAccountWindow onSuccess={() => setActiveSubPanel('affiliate')} targetType="affiliate" />
                         </div>
                       )
                     ) : (
@@ -408,7 +393,7 @@ function MainLayout() {
                               Ambil bahagian borong pukal dengan diskaun modal tinggi. Urus simpanan stok setempat, lancarkan jualan tempatan, and binakan ledger perniagaan anda sendiri!
                             </p>
                           </div>
-                          <AuthWindow onSuccess={() => setActiveSubPanel('agent')} initialMode="agent" />
+                          <UpgradeAccountWindow onSuccess={() => setActiveSubPanel('agent')} targetType="agent" />
                         </div>
                       )
                     ) : (
@@ -446,7 +431,7 @@ function MainLayout() {
                           <ShieldAlert className="h-4 w-4 shrink-0 text-purple-700 animate-bounce" />
                           <span>Modul ini terhad kepada pentadbir HQ. Sila log masuk dengan akaun admin anda.</span>
                         </div>
-                        <AuthWindow onSuccess={() => setActiveSubPanel('admin')} initialMode="login" />
+                        <AdminLoginWindow onSuccess={() => setActiveSubPanel('admin')} />
                       </div>
                     )
                   )}

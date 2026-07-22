@@ -143,6 +143,7 @@ export const InventoryManager: React.FC = () => {
   const [bulkStockWarehouseId, setBulkStockWarehouseId] = useState('b1');
   const [bulkStockReason, setBulkStockReason] = useState('Bulk Warehouse Deployment');
   const [feedbackMsg, setFeedbackMsg] = useState('');
+  const [feedbackType, setFeedbackType] = useState<'success' | 'error'>('success');
 
   // Add / Edit Product form state
   const [productForm, setProductForm] = useState<Partial<Product>>({
@@ -351,40 +352,42 @@ export const InventoryManager: React.FC = () => {
     setShowAddEditModal(true);
   };
 
-  const saveProductForm = (e: React.FormEvent) => {
+  const saveProductForm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!productForm.name || !productForm.sku) {
-      showNotice('Product Name and SKU are required.');
+      showNotice('Product Name and SKU are required.', 'error');
       return;
     }
 
-    if (selectedProductForEdit) {
-      updateProduct(selectedProductForEdit.id, productForm);
-    } else {
-      const generatedId = `p-${Date.now()}`;
-      addProduct({
-        id: generatedId,
-        name: productForm.name!,
-        category: productForm.category as 'Honey' | 'Coconut Oil',
-        price: Number(productForm.price),
-        description: productForm.description || '',
-        stock: Number(productForm.stock || 0),
-        image: productForm.image || 'https://images.unsplash.com/photo-1587049352846-4a222e784d38?auto=format&fit=crop&q=80&w=400',
-        images: productForm.images || [productForm.image].filter(Boolean) as string[],
-        volume: productForm.volume || '500g',
-        
-        sku: productForm.sku,
-        costPrice: Number(productForm.costPrice),
-        longDescription: productForm.longDescription,
-        weight: Number(productForm.weight),
-        dimensions: productForm.dimensions,
-        barcode: productForm.barcode,
-        status: (productForm.status || 'draft') as any,
-        isHalalCertified: productForm.isHalalCertified,
-        halalCertNumber: productForm.halalCertNumber,
-        isBumiputera: productForm.isBumiputera,
-        healthWarning: productForm.healthWarning
-      });
+    const result = selectedProductForEdit
+      ? await updateProduct(selectedProductForEdit.id, productForm)
+      : await addProduct({
+          id: `p-${Date.now()}`,
+          name: productForm.name!,
+          category: productForm.category as 'Honey' | 'Coconut Oil',
+          price: Number(productForm.price),
+          description: productForm.description || '',
+          stock: Number(productForm.stock || 0),
+          image: productForm.image || 'https://images.unsplash.com/photo-1587049352846-4a222e784d38?auto=format&fit=crop&q=80&w=400',
+          images: productForm.images || [productForm.image].filter(Boolean) as string[],
+          volume: productForm.volume || '500g',
+
+          sku: productForm.sku,
+          costPrice: Number(productForm.costPrice),
+          longDescription: productForm.longDescription,
+          weight: Number(productForm.weight),
+          dimensions: productForm.dimensions,
+          barcode: productForm.barcode,
+          status: (productForm.status || 'draft') as any,
+          isHalalCertified: productForm.isHalalCertified,
+          halalCertNumber: productForm.halalCertNumber,
+          isBumiputera: productForm.isBumiputera,
+          healthWarning: productForm.healthWarning
+        });
+
+    if (!result.success) {
+      showNotice(result.error || 'Failed to save product to Supabase.', 'error');
+      return;
     }
 
     setShowAddEditModal(false);
@@ -456,10 +459,10 @@ export const InventoryManager: React.FC = () => {
   };
 
   // Stock movement triggers
-  const lodgeStockMovement = (e: React.FormEvent) => {
+  const lodgeStockMovement = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!movementForm.productId) {
-      showNotice('Please select a product first.');
+      showNotice('Please select a product first.', 'error');
       return;
     }
 
@@ -467,7 +470,7 @@ export const InventoryManager: React.FC = () => {
     const sign = ['stock_out', 'transfer_out', 'damaged', 'expired', 'sale', 'write_off'].includes(movementForm.movementType) ? -1 : 1;
     const finalQty = Math.abs(movementForm.quantity) * sign;
 
-    recordStockMovement(
+    const result = await recordStockMovement(
       movementForm.productId,
       movementForm.warehouseId,
       movementForm.movementType,
@@ -478,6 +481,11 @@ export const InventoryManager: React.FC = () => {
       movementForm.movementType === 'transfer_out' ? movementForm.warehouseId : undefined,
       movementForm.movementType === 'transfer_in' ? movementForm.warehouseId : undefined
     );
+
+    if (!result.success) {
+      showNotice(result.error || 'Failed to lodge stock movement to Supabase.', 'error');
+      return;
+    }
 
     setShowMovementForm(false);
     showNotice('Stock movement lodged successfully!');
@@ -504,15 +512,21 @@ export const InventoryManager: React.FC = () => {
     showNotice(`Status updated to "${bulkStatusToApply}" for ${selectedProductIds.length} items.`);
   };
 
-  const handleBulkStockAddition = () => {
+  const handleBulkStockAddition = async () => {
     if (selectedProductIds.length === 0) {
-      showNotice('Please select at least one SKU.');
+      showNotice('Please select at least one SKU.', 'error');
       return;
     }
     const changesArray = selectedProductIds.map(id => ({ productId: id, quantity: bulkStockQty }));
-    bulkStockChange(changesArray, bulkStockWarehouseId, 'stock_in', bulkStockReason, `BULK-M-ADD`);
+    const itemCount = selectedProductIds.length;
+    const result = await bulkStockChange(changesArray, bulkStockWarehouseId, 'stock_in', bulkStockReason, `BULK-M-ADD`);
     setSelectedProductIds([]);
-    showNotice(`Successfully added ${bulkStockQty} units to ${selectedProductIds.length} items at targeted Branch.`);
+
+    if (!result.success) {
+      showNotice(result.error || 'Failed to sync bulk stock update to Supabase.', 'error');
+      return;
+    }
+    showNotice(`Successfully added ${bulkStockQty} units to ${itemCount} items at targeted Branch.`);
   };
 
   const handleBulkDelete = () => {
@@ -550,11 +564,12 @@ export const InventoryManager: React.FC = () => {
     showNotice('Alert resolved and marked settled!');
   };
 
-  const showNotice = (msg: string) => {
+  const showNotice = (msg: string, type: 'success' | 'error' = 'success') => {
     setFeedbackMsg(msg);
+    setFeedbackType(type);
     setTimeout(() => {
       setFeedbackMsg('');
-    }, 4000);
+    }, type === 'error' ? 7000 : 4000);
   };
 
   return (
@@ -562,8 +577,14 @@ export const InventoryManager: React.FC = () => {
       
       {/* Toast Notice */}
       {feedbackMsg && (
-        <div className="fixed bottom-5 right-5 bg-slate-900 border border-slate-800 text-emerald-400 p-4 rounded-2xl shadow-2xl z-50 flex items-center gap-3 font-semibold text-xs animate-bounce">
-          <CheckCircle className="h-4 w-4 text-emerald-400 shrink-0" />
+        <div className={`fixed bottom-5 right-5 max-w-sm bg-slate-900 border p-4 rounded-2xl shadow-2xl z-50 flex items-center gap-3 font-semibold text-xs animate-bounce ${
+          feedbackType === 'error' ? 'border-red-800 text-red-400' : 'border-slate-800 text-emerald-400'
+        }`}>
+          {feedbackType === 'error' ? (
+            <AlertCircle className="h-4 w-4 text-red-400 shrink-0" />
+          ) : (
+            <CheckCircle className="h-4 w-4 text-emerald-400 shrink-0" />
+          )}
           <span>{feedbackMsg}</span>
         </div>
       )}

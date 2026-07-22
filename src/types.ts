@@ -12,6 +12,7 @@ export interface UserAccount {
   email: string;
   userType: UserType;
   status: UserStatus;
+  passwordHash?: string; // "<saltHex>:<hashHex>" (PBKDF2-SHA256), unset for legacy/admin-created accounts
   createdAt: string;
 }
 

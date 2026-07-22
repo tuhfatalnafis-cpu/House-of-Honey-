@@ -33,6 +33,7 @@ import {
   Campaign
 } from '../types';
 import { supabaseDb, isSupabaseConfigured } from '../lib/supabase';
+import { hashPassword, verifyPassword } from '../lib/passwordHash';
 
 interface AppContextType {
   // Authentication & Session
@@ -77,12 +78,12 @@ interface AppContextType {
   setSuppliers: React.Dispatch<React.SetStateAction<ProductSupplier[]>>;
   setCategories: React.Dispatch<React.SetStateAction<ProductCategory[]>>;
 
-  addProduct: (product: Product) => void;
-  updateProduct: (id: string, updates: Partial<Product>) => void;
+  addProduct: (product: Product) => Promise<{ success: boolean; error?: string }>;
+  updateProduct: (id: string, updates: Partial<Product>) => Promise<{ success: boolean; error?: string }>;
   deleteProduct: (id: string) => void;
   duplicateProduct: (id: string, name: string, newSku: string, copyFlags: { images: boolean; desc: boolean; price: boolean; specs: boolean; stock: boolean }) => void;
-  recordStockMovement: (productId: string, warehouseId: string, movementType: StockMovementType, quantity: number, reason: string, refNum?: string, notes?: string, fromId?: string, toId?: string) => void;
-  bulkStockChange: (changes: { productId: string; quantity: number }[], warehouseId: string, movementType: StockMovementType, reason: string, refNum?: string) => void;
+  recordStockMovement: (productId: string, warehouseId: string, movementType: StockMovementType, quantity: number, reason: string, refNum?: string, notes?: string, fromId?: string, toId?: string) => Promise<{ success: boolean; error?: string }>;
+  bulkStockChange: (changes: { productId: string; quantity: number }[], warehouseId: string, movementType: StockMovementType, reason: string, refNum?: string) => Promise<{ success: boolean; error?: string; failedCount?: number }>;
   bulkPricesChange: (productIds: string[], type: 'fixed' | 'percentage', changeAmount: number, reason: string) => void;
   bulkStatusChange: (productIds: string[], status: 'active' | 'inactive') => void;
   bulkDeleteProducts: (productIds: string[]) => void;
@@ -101,28 +102,46 @@ interface AppContextType {
   setLanguage: (lang: 'en' | 'ms') => void;
   
   // Authentication Core Action Handlers
-  login: (email: string, pass?: string) => Promise<{ success: boolean; error?: string; user?: UserAccount }>;
-  registerCustomer: (name: string, email: string, phone: string) => Promise<{ success: boolean; error?: string }>;
-  registerAffiliateEx: (fields: { 
-    name: string; 
-    email: string; 
-    ic: string; 
-    whatsapp: string; 
-    address: string; 
-    bankName: string; 
-    bankNo: string; 
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string; user?: UserAccount; needsPasswordSetup?: boolean }>;
+  setPassword: (accountId: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
+  registerCustomer: (name: string, email: string, phone: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  registerAffiliateEx: (fields: {
+    name: string;
+    email: string;
+    ic: string;
+    whatsapp: string;
+    address: string;
+    bankName: string;
+    bankNo: string;
     holderName: string;
+    password: string;
   }) => Promise<{ success: boolean; error?: string }>;
-  registerAgentEx: (fields: { 
-    name: string; 
-    email: string; 
-    ic: string; 
-    whatsapp: string; 
-    address: string; 
-    bankName: string; 
-    bankNo: string; 
-    holderName: string; 
+  registerAgentEx: (fields: {
+    name: string;
+    email: string;
+    ic: string;
+    whatsapp: string;
+    address: string;
+    bankName: string;
+    bankNo: string;
+    holderName: string;
     tier: TierType;
+    password: string;
+  }) => Promise<{ success: boolean; error?: string; agentId?: string }>;
+  // Upgrade an already-logged-in customer account to affiliate/agent status without
+  // re-collecting name/email/password, and reusing IC/bank details already on file.
+  upgradeToAffiliate: (fields: {
+    ic: string;
+    whatsapp: string;
+    bankAccountId?: string;
+    newBank?: { bankName: string; bankNo: string; holderName: string };
+  }) => Promise<{ success: boolean; error?: string }>;
+  upgradeToAgent: (fields: {
+    ic: string;
+    whatsapp: string;
+    tier: TierType;
+    bankAccountId?: string;
+    newBank?: { bankName: string; bankNo: string; holderName: string };
   }) => Promise<{ success: boolean; error?: string; agentId?: string }>;
   logout: () => void;
 
@@ -548,21 +567,60 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   /**
    * AUTHENTICATION FLOW: Unified login matching email passwords safely
    */
-  const login = async (email: string, pass?: string): Promise<{ success: boolean; error?: string; user?: UserAccount }> => {
+  const login = async (email: string, password: string): Promise<{ success: boolean; error?: string; user?: UserAccount; needsPasswordSetup?: boolean }> => {
     const cleanEmail = (email || '').toLowerCase().trim();
     const account = userAccounts.find(a => a.email && a.email.toLowerCase() === cleanEmail);
     if (!account) {
-      return { success: false, error: 'User account not found.' };
+      return { success: false, error: 'Invalid email or password.' };
     }
     if (account.status === 'suspended') {
       return { success: false, error: 'This account has been suspended by HQ.' };
     }
-    
+
+    // Accounts created before password auth existed (or by an admin without one) have no hash yet —
+    // route them through a one-time "set your password" step instead of granting access on email alone.
+    if (!account.passwordHash) {
+      return { success: false, needsPasswordSetup: true, user: account };
+    }
+
+    const match = await verifyPassword(password, account.passwordHash);
+    if (!match) {
+      return { success: false, error: 'Invalid email or password.' };
+    }
+
     const profile = userProfiles.find(p => p.userId === account.id);
     setCurrentUserAccount(account);
     setCurrentUserProfile(profile || null);
-    
+
     return { success: true, user: account };
+  };
+
+  const setPassword = async (accountId: string, newPassword: string): Promise<{ success: boolean; error?: string }> => {
+    const account = userAccounts.find(a => a.id === accountId);
+    if (!account) {
+      return { success: false, error: 'Account not found.' };
+    }
+    if (!newPassword || newPassword.length < 6) {
+      return { success: false, error: 'Password must be at least 6 characters.' };
+    }
+
+    const passwordHash = await hashPassword(newPassword);
+    const updatedAccount: UserAccount = { ...account, passwordHash };
+
+    if (isSupabaseConfigured) {
+      const ok = await supabaseDb.upsertUserAccounts([updatedAccount]);
+      if (!ok) {
+        return { success: false, error: 'Failed to save the new password to Supabase. Please try again.' };
+      }
+    }
+
+    setUserAccounts(prev => prev.map(a => a.id === accountId ? updatedAccount : a));
+
+    const profile = userProfiles.find(p => p.userId === accountId);
+    setCurrentUserAccount(updatedAccount);
+    setCurrentUserProfile(profile || null);
+
+    return { success: true };
   };
 
   const logout = () => {
@@ -573,10 +631,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   /**
    * AUTH SERVICE: Register Customer accounts
    */
-  const registerCustomer = async (name: string, email: string, phone: string): Promise<{ success: boolean; error?: string }> => {
+  const registerCustomer = async (name: string, email: string, phone: string, password: string): Promise<{ success: boolean; error?: string }> => {
     const cleanEmail = (email || '').toLowerCase().trim();
     if (userAccounts.some(a => a.email && a.email.toLowerCase() === cleanEmail)) {
       return { success: false, error: 'Email already registered.' };
+    }
+    if (!password || password.length < 6) {
+      return { success: false, error: 'Password must be at least 6 characters.' };
     }
 
     const newAccId = `acc-cust-${Date.now().toString().slice(-4)}`;
@@ -585,6 +646,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       email: cleanEmail,
       userType: 'customer',
       status: 'active',
+      passwordHash: await hashPassword(password),
       createdAt: new Date().toISOString()
     };
 
@@ -615,30 +677,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   /**
    * AUTH SERVICE: Register Affiliate accounts with auto generated coupon code
    */
-  const registerAffiliateEx = async (fields: { 
-    name: string; 
-    email: string; 
-    ic: string; 
-    whatsapp: string; 
-    address: string; 
-    bankName: string; 
-    bankNo: string; 
-    holderName: string; 
+  const registerAffiliateEx = async (fields: {
+    name: string;
+    email: string;
+    ic: string;
+    whatsapp: string;
+    address: string;
+    bankName: string;
+    bankNo: string;
+    holderName: string;
+    password: string;
   }): Promise<{ success: boolean; error?: string }> => {
     const cleanEmail = (fields.email || '').toLowerCase().trim();
     if (userAccounts.some(a => a.email && a.email.toLowerCase() === cleanEmail)) {
       return { success: false, error: 'Email already registered.' };
     }
+    if (!fields.password || fields.password.length < 6) {
+      return { success: false, error: 'Password must be at least 6 characters.' };
+    }
 
     const uniqueCode = 'AFX' + Math.random().toString(36).substring(2, 8).toUpperCase();
     const uniqueToken = Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 6).toUpperCase();
     const newAccId = `acc-aff-${uniqueToken}`;
-    
+
     const newAcc: UserAccount = {
       id: newAccId,
       email: cleanEmail,
       userType: 'affiliate',
       status: 'active',
+      passwordHash: await hashPassword(fields.password),
       createdAt: new Date().toISOString()
     };
 
@@ -746,20 +813,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   /**
    * AUTH SERVICE: Register Agent accounts (includes instant tier stock purchase)
    */
-  const registerAgentEx = async (fields: { 
-    name: string; 
-    email: string; 
-    ic: string; 
-    whatsapp: string; 
-    address: string; 
-    bankName: string; 
-    bankNo: string; 
-    holderName: string; 
+  const registerAgentEx = async (fields: {
+    name: string;
+    email: string;
+    ic: string;
+    whatsapp: string;
+    address: string;
+    bankName: string;
+    bankNo: string;
+    holderName: string;
     tier: TierType;
+    password: string;
   }): Promise<{ success: boolean; error?: string; agentId?: string }> => {
     const cleanEmail = (fields.email || '').toLowerCase().trim();
     if (userAccounts.some(a => a.email && a.email.toLowerCase() === cleanEmail)) {
       return { success: false, error: 'Email already registered.' };
+    }
+    if (!fields.password || fields.password.length < 6) {
+      return { success: false, error: 'Password must be at least 6 characters.' };
     }
 
     // Set initial configuration parameters
@@ -785,12 +856,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const uniqueToken = Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 6).toUpperCase();
     const newAccId = `acc-agt-${uniqueToken}`;
-    
+
     const newAcc: UserAccount = {
       id: newAccId,
       email: cleanEmail,
       userType: 'agent',
       status: 'active',
+      passwordHash: await hashPassword(fields.password),
       createdAt: new Date().toISOString()
     };
 
@@ -904,6 +976,255 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setCurrentUserAccount(newAcc);
     setCurrentUserProfile(newProf);
+
+    return { success: true, agentId: agtId };
+  };
+
+  /**
+   * UPGRADE SERVICE: Attach an Affiliate record to an already-logged-in account.
+   * Reuses the existing name/email/IC/bank on file instead of re-collecting them.
+   */
+  const upgradeToAffiliate = async (fields: {
+    ic: string;
+    whatsapp: string;
+    bankAccountId?: string;
+    newBank?: { bankName: string; bankNo: string; holderName: string };
+  }): Promise<{ success: boolean; error?: string }> => {
+    if (!currentUserAccount) {
+      return { success: false, error: 'You must be logged in.' };
+    }
+    if (affiliates.some(a => a.userId === currentUserAccount.id)) {
+      return { success: false, error: 'This account is already registered as an affiliate.' };
+    }
+
+    let bankAccountId = fields.bankAccountId;
+    if (!bankAccountId && fields.newBank) {
+      const uniqueToken = Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 6).toUpperCase();
+      const newBank: BankAccount = {
+        id: `bnk-aff-${uniqueToken}`,
+        userId: currentUserAccount.id,
+        accountHolderName: fields.newBank.holderName || currentUserProfile?.fullName || currentUserAccount.email,
+        bankName: fields.newBank.bankName,
+        accountNumber: fields.newBank.bankNo,
+        accountType: 'savings',
+        isVerified: false,
+        isDefault: !bankAccounts.some(b => b.userId === currentUserAccount.id)
+      };
+      setBankAccounts(prev => [...prev, newBank]);
+      if (isSupabaseConfigured) {
+        await supabaseDb.upsertBankAccounts([newBank]);
+      }
+      bankAccountId = newBank.id;
+    }
+
+    if (!bankAccountId) {
+      return { success: false, error: 'A payout bank account is required.' };
+    }
+
+    if (currentUserProfile && !currentUserProfile.icNumber && fields.ic) {
+      updateUserProfile(currentUserAccount.id, { icNumber: fields.ic, dateOfBirth: extractDOBFromIC(fields.ic), whatsappNumber: fields.whatsapp });
+    } else if (currentUserProfile) {
+      updateUserProfile(currentUserAccount.id, { whatsappNumber: fields.whatsapp });
+    }
+
+    let recruitedBy: string | undefined = undefined;
+    const activeRefCode = referralCode || localStorage.getItem('mp_referral_code') || localStorage.getItem('MP_referral_code');
+    if (activeRefCode) {
+      const upline = affiliates.find(a => a.code.toUpperCase() === activeRefCode.toUpperCase());
+      if (upline) {
+        recruitedBy = upline.id;
+        setAffiliates(prev => {
+          const nextAffs = prev.map(a => {
+            if (a.id === upline.id) {
+              const updatedUpline = { ...a, conversions: (a.conversions || 0) + 1 };
+              if (isSupabaseConfigured) {
+                supabaseDb.upsertAffiliates([updatedUpline]).catch(e => {
+                  console.error("Failed to update upline conversions in Supabase:", e);
+                });
+              }
+              return updatedUpline;
+            }
+            return a;
+          });
+          localStorage.setItem('mp_affiliates', JSON.stringify(nextAffs));
+          return nextAffs;
+        });
+        addAuditLog('Referral Attribution', 'affiliates', upline.id, `Attributed conversion from upgraded registration under code ${activeRefCode}`);
+      }
+    }
+
+    const uniqueToken = Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 6).toUpperCase();
+    const newAff: Affiliate = {
+      id: `aff-${uniqueToken}`,
+      userId: currentUserAccount.id,
+      name: currentUserProfile?.fullName || currentUserAccount.email,
+      email: currentUserAccount.email,
+      whatsapp: fields.whatsapp,
+      code: 'AFX' + Math.random().toString(36).substring(2, 8).toUpperCase(),
+      signupDate: new Date().toISOString().split('T')[0],
+      tier: 'Bronze',
+      unitsSold: 0,
+      lifetimeSales: 0,
+      lifetimeCommissions: 0,
+      bankAccountId,
+      recruitedBy
+    };
+
+    setAffiliates(prev => [...prev, newAff]);
+    if (isSupabaseConfigured) {
+      await supabaseDb.upsertAffiliates([newAff]);
+    }
+
+    const updatedAcc: UserAccount = { ...currentUserAccount, userType: 'affiliate' };
+    setUserAccounts(prev => prev.map(a => a.id === updatedAcc.id ? updatedAcc : a));
+    setCurrentUserAccount(updatedAcc);
+    if (isSupabaseConfigured) {
+      await supabaseDb.upsertUserAccounts([updatedAcc]);
+    }
+
+    addAuditLog('Affiliate Upgrade', 'affiliates', newAff.id, `Existing account ${currentUserAccount.email} upgraded to affiliate`);
+
+    return { success: true };
+  };
+
+  /**
+   * UPGRADE SERVICE: Attach an Agent record to an already-logged-in account.
+   * Reuses the existing name/email/IC/bank on file instead of re-collecting them.
+   */
+  const upgradeToAgent = async (fields: {
+    ic: string;
+    whatsapp: string;
+    tier: TierType;
+    bankAccountId?: string;
+    newBank?: { bankName: string; bankNo: string; holderName: string };
+  }): Promise<{ success: boolean; error?: string; agentId?: string }> => {
+    if (!currentUserAccount) {
+      return { success: false, error: 'You must be logged in.' };
+    }
+    if (agents.some(a => a.userId === currentUserAccount.id)) {
+      return { success: false, error: 'This account is already registered as an agent.' };
+    }
+
+    let bankAccountId = fields.bankAccountId;
+    if (!bankAccountId && fields.newBank) {
+      const uniqueToken = Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 6).toUpperCase();
+      const newBank: BankAccount = {
+        id: `bnk-agt-${uniqueToken}`,
+        userId: currentUserAccount.id,
+        accountHolderName: fields.newBank.holderName || currentUserProfile?.fullName || currentUserAccount.email,
+        bankName: fields.newBank.bankName,
+        accountNumber: fields.newBank.bankNo,
+        accountType: 'savings',
+        isVerified: false,
+        isDefault: !bankAccounts.some(b => b.userId === currentUserAccount.id)
+      };
+      setBankAccounts(prev => [...prev, newBank]);
+      if (isSupabaseConfigured) {
+        await supabaseDb.upsertBankAccounts([newBank]);
+      }
+      bankAccountId = newBank.id;
+    }
+
+    if (!bankAccountId) {
+      return { success: false, error: 'A payout bank account is required.' };
+    }
+
+    if (currentUserProfile && !currentUserProfile.icNumber && fields.ic) {
+      updateUserProfile(currentUserAccount.id, { icNumber: fields.ic, dateOfBirth: extractDOBFromIC(fields.ic), whatsappNumber: fields.whatsapp });
+    } else if (currentUserProfile) {
+      updateUserProfile(currentUserAccount.id, { whatsappNumber: fields.whatsapp });
+    }
+
+    let minPurchase = 1000;
+    let discount = 0.20;
+    let comm = 0.15;
+    let initialBtls = 11;
+    let maxInv = 100;
+
+    if (fields.tier === 'Silver') {
+      minPurchase = 5000;
+      discount = 0.30;
+      comm = 0.20;
+      initialBtls = 59;
+      maxInv = 500;
+    } else if (fields.tier === 'Gold') {
+      minPurchase = 15000;
+      discount = 0.40;
+      comm = 0.25;
+      initialBtls = 176;
+      maxInv = -1; // Unlimited
+    }
+
+    let recruitedBy: string | undefined = undefined;
+    const activeRefCode = referralCode || localStorage.getItem('mp_referral_code') || localStorage.getItem('MP_referral_code');
+    if (activeRefCode) {
+      const upline = affiliates.find(a => a.code.toUpperCase() === activeRefCode.toUpperCase());
+      if (upline) {
+        recruitedBy = upline.id;
+        setAffiliates(prev => {
+          const nextAffs = prev.map(a => {
+            if (a.id === upline.id) {
+              const updatedUpline = { ...a, conversions: (a.conversions || 0) + 1 };
+              if (isSupabaseConfigured) {
+                supabaseDb.upsertAffiliates([updatedUpline]).catch(e => {
+                  console.error("Failed to update upline conversions in Supabase:", e);
+                });
+              }
+              return updatedUpline;
+            }
+            return a;
+          });
+          localStorage.setItem('mp_affiliates', JSON.stringify(nextAffs));
+          return nextAffs;
+        });
+        addAuditLog('Referral Attribution', 'affiliates', upline.id, `Attributed conversion from upgraded registration under code ${activeRefCode}`);
+      }
+    }
+
+    const uniqueToken = Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 6).toUpperCase();
+    const agtId = `agt-${uniqueToken}`;
+    const newAgent: Agent = {
+      id: agtId,
+      userId: currentUserAccount.id,
+      agentTier: fields.tier,
+      initialStockPurchase: minPurchase,
+      stockBalance: initialBtls,
+      stockAllocated: initialBtls,
+      discountRate: discount,
+      commissionRate: comm,
+      maxInventory: maxInv,
+      bankAccountId,
+      verifiedAt: new Date().toISOString(),
+      recruitedBy
+    };
+
+    const initialLog: AgentStockLog = {
+      id: `log-agt-${uniqueToken}`,
+      agentId: agtId,
+      productId: 'p1',
+      quantity: initialBtls,
+      action: 'purchase',
+      transactionId: `pay-${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
+      notes: `Signup bundle purchase of ${initialBtls} bottles at ${fields.tier} level discount.`,
+      createdAt: new Date().toISOString()
+    };
+
+    setAgents(prev => [...prev, newAgent]);
+    setAgentStockLogs(prev => [initialLog, ...prev]);
+
+    if (isSupabaseConfigured) {
+      await supabaseDb.upsertAgents([newAgent]);
+      await supabaseDb.upsertAgentStockLogs([initialLog]);
+    }
+
+    const updatedAcc: UserAccount = { ...currentUserAccount, userType: 'agent' };
+    setUserAccounts(prev => prev.map(a => a.id === updatedAcc.id ? updatedAcc : a));
+    setCurrentUserAccount(updatedAcc);
+    if (isSupabaseConfigured) {
+      await supabaseDb.upsertUserAccounts([updatedAcc]);
+    }
+
+    addAuditLog('Agent Upgrade', 'agents', agtId, `Existing account ${currentUserAccount.email} upgraded to ${fields.tier} agent`);
 
     return { success: true, agentId: agtId };
   };
@@ -1518,19 +1839,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return res;
   };
 
-  const addProduct = (product: Product) => {
-    setProducts(prev => {
-      const updated = [...prev, { ...product, sku: product.sku || `MAD-TU-${Math.floor(Math.random()*1000)}`, status: product.status || 'draft', createdAt: new Date().toISOString() }];
-      if (isSupabaseConfigured) {
-        try { supabaseDb.upsertProducts(updated); } catch (e) { console.error(e); }
+  const addProduct = async (product: Product): Promise<{ success: boolean; error?: string }> => {
+    const newProduct: Product = {
+      ...product,
+      sku: product.sku || `MAD-TU-${Math.floor(Math.random()*1000)}`,
+      status: product.status || 'draft',
+      createdAt: new Date().toISOString()
+    };
+
+    if (isSupabaseConfigured) {
+      const ok = await supabaseDb.upsertProducts([newProduct]);
+      if (!ok) {
+        return { success: false, error: `Failed to save "${newProduct.name}" to Supabase. The product was not added.` };
       }
-      return updated;
-    });
+    }
+
+    setProducts(prev => [...prev, newProduct]);
 
     setInventory(prev => {
       const newItems = branches.map(branch => ({
         id: `inv-${Date.now()}-${branch.id}-${Math.floor(Math.random()*1000)}`,
-        productId: product.id,
+        productId: newProduct.id,
         warehouseId: branch.id,
         quantityOnHand: 0,
         quantityReserved: 0,
@@ -1542,31 +1871,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return [...prev, ...newItems];
     });
 
-    addAuditLog('Product Created', 'products', product.id, `New SKU: ${product.sku || 'N/A'}`);
+    addAuditLog('Product Created', 'products', newProduct.id, `New SKU: ${newProduct.sku}`);
+    return { success: true };
   };
 
-  const updateProduct = (id: string, updates: Partial<Product>) => {
-    let oldPrice = 0;
-    setProducts(prev => {
-      const updated = prev.map(p => {
-        if (p.id === id) {
-          oldPrice = p.price;
-          return { ...p, ...updates };
-        }
-        return p;
-      });
-      if (isSupabaseConfigured) {
-        try { supabaseDb.upsertProducts(updated); } catch (e) { console.error(e); }
-      }
-      return updated;
-    });
+  const updateProduct = async (id: string, updates: Partial<Product>): Promise<{ success: boolean; error?: string }> => {
+    const current = products.find(p => p.id === id);
+    if (!current) {
+      return { success: false, error: 'Product not found.' };
+    }
 
-    if (updates.price !== undefined && updates.price !== oldPrice) {
+    const updatedProduct: Product = { ...current, ...updates };
+
+    if (isSupabaseConfigured) {
+      const ok = await supabaseDb.upsertProducts([updatedProduct]);
+      if (!ok) {
+        return { success: false, error: `Failed to save changes to "${current.name}" to Supabase. No changes were applied.` };
+      }
+    }
+
+    setProducts(prev => prev.map(p => p.id === id ? updatedProduct : p));
+
+    if (updates.price !== undefined && updates.price !== current.price) {
       setPricingHistory(prev => [
         {
           id: `prh-${Date.now()}-${Math.floor(Math.random()*1000)}`,
           productId: id,
-          oldPrice,
+          oldPrice: current.price,
           newPrice: updates.price!,
           changeReason: updates.discountPercentage ? 'Campaign Discount Activation' : 'Administrative Cost Adjustment',
           effectiveDate: new Date().toISOString(),
@@ -1596,6 +1927,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     addAuditLog('Product Updated', 'products', id, JSON.stringify(updates));
+    return { success: true };
   };
 
   const deleteProduct = (id: string) => {
@@ -1676,7 +2008,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addAuditLog('Product Duplicated', 'products', id, `Cloned into new SKU ${newSku}`);
   };
 
-  const recordStockMovement = (
+  const recordStockMovement = async (
     productId: string,
     warehouseId: string,
     movementType: StockMovementType,
@@ -1686,7 +2018,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     notes?: string,
     fromId?: string,
     toId?: string
-  ) => {
+  ): Promise<{ success: boolean; error?: string }> => {
+    const targetProduct = products.find(p => p.id === productId);
+    if (!targetProduct) {
+      return { success: false, error: 'Product not found.' };
+    }
+
+    // The product's stock is the single source of truth for the catalog/checkout — apply the
+    // movement as a direct delta on it. (Deriving it by summing per-warehouse InventoryItem rows
+    // is unreliable because branches/warehouses have no creation UI, so that ledger is normally empty.)
+    const newStock = Math.max(0, targetProduct.stock + quantity);
+    const updatedProduct: Product = { ...targetProduct, stock: newStock };
+
+    if (isSupabaseConfigured) {
+      const ok = await supabaseDb.upsertProducts([updatedProduct]);
+      if (!ok) {
+        return { success: false, error: `Failed to sync stock update for "${targetProduct.name}" to Supabase. No changes were applied.` };
+      }
+    }
+
     const movementId = `mv-${Date.now()}-${Math.floor(Math.random()*1000)}`;
     const newMovement: StockMovement = {
       id: movementId,
@@ -1704,80 +2054,90 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setStockMovements(prev => [newMovement, ...prev]);
+    setProducts(prev => prev.map(p => p.id === productId ? updatedProduct : p));
 
-    // Update quantities in inventory item
+    // Upsert (create-if-missing) the matching warehouse's inventory ledger row so the Inventory
+    // tab reflects this movement too — this is a secondary, local-only display ledger and does
+    // not drive the product's stock figure above.
+    let resultingItemQty = 0;
+    let resultingReorderLevel = 20;
     setInventory(prev => {
-      let updatedTotalStock = 0;
-      const step1 = prev.map(item => {
-        if (item.productId === productId && item.warehouseId === warehouseId) {
-          const newOnHand = Math.max(0, item.quantityOnHand + quantity);
-          updatedTotalStock += newOnHand;
-          return {
-            ...item,
-            quantityOnHand: newOnHand,
-            quantityAvailable: Math.max(0, newOnHand - item.quantityReserved),
-            isLowStock: newOnHand < item.reorderLevel,
-            isOutOfStock: newOnHand === 0
-          };
-        }
-        if (item.productId === productId) {
-          updatedTotalStock += item.quantityOnHand;
-        }
-        return item;
+      const idx = prev.findIndex(item => item.productId === productId && item.warehouseId === warehouseId);
+      if (idx === -1) {
+        resultingItemQty = Math.max(0, quantity);
+        const newItem: InventoryItem = {
+          id: `inv-${Date.now()}-${warehouseId}-${Math.floor(Math.random()*1000)}`,
+          productId,
+          warehouseId,
+          quantityOnHand: resultingItemQty,
+          quantityReserved: 0,
+          quantityAvailable: resultingItemQty,
+          reorderLevel: resultingReorderLevel,
+          reorderQuantity: 50,
+          isLowStock: resultingItemQty < resultingReorderLevel,
+          isOutOfStock: resultingItemQty === 0
+        };
+        return [...prev, newItem];
+      }
+      return prev.map((item, i) => {
+        if (i !== idx) return item;
+        const newOnHand = Math.max(0, item.quantityOnHand + quantity);
+        resultingItemQty = newOnHand;
+        resultingReorderLevel = item.reorderLevel;
+        return {
+          ...item,
+          quantityOnHand: newOnHand,
+          quantityAvailable: Math.max(0, newOnHand - item.quantityReserved),
+          isLowStock: newOnHand < item.reorderLevel,
+          isOutOfStock: newOnHand === 0
+        };
       });
-
-      // Synchronize back to the main products catalog stock aggregate!
-      setProducts(pList => pList.map(p => p.id === productId ? { ...p, stock: updatedTotalStock } : p));
-      return step1;
     });
 
-    // Check for alerts
-    const targetInv = inventory.find(i => i.productId === productId && i.warehouseId === warehouseId);
-    if (targetInv) {
-      const newQty = Math.max(0, targetInv.quantityOnHand + quantity);
-      if (newQty === 0) {
-        setStockAlerts(prev => [
-          {
-            id: `al-${Date.now()}-${Math.floor(Math.random()*1000)}`,
-            productId,
-            warehouseId,
-            alertType: 'out_of_stock',
-            currentQuantity: 0,
-            thresholdValue: targetInv.reorderLevel,
-            isResolved: false,
-            createdAt: new Date().toISOString()
-          },
-          ...prev
-        ]);
-      } else if (newQty < targetInv.reorderLevel) {
-        setStockAlerts(prev => [
-          {
-            id: `al-${Date.now()}-${Math.floor(Math.random()*1000)}`,
-            productId,
-            warehouseId,
-            alertType: 'low_stock',
-            currentQuantity: newQty,
-            thresholdValue: targetInv.reorderLevel,
-            isResolved: false,
-            createdAt: new Date().toISOString()
-          },
-          ...prev
-        ]);
-      }
+    if (resultingItemQty === 0) {
+      setStockAlerts(prev => [
+        {
+          id: `al-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+          productId,
+          warehouseId,
+          alertType: 'out_of_stock',
+          currentQuantity: 0,
+          thresholdValue: resultingReorderLevel,
+          isResolved: false,
+          createdAt: new Date().toISOString()
+        },
+        ...prev
+      ]);
+    } else if (resultingItemQty < resultingReorderLevel) {
+      setStockAlerts(prev => [
+        {
+          id: `al-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+          productId,
+          warehouseId,
+          alertType: 'low_stock',
+          currentQuantity: resultingItemQty,
+          thresholdValue: resultingReorderLevel,
+          isResolved: false,
+          createdAt: new Date().toISOString()
+        },
+        ...prev
+      ]);
     }
 
     addAuditLog('Stock Movement Logged', 'inventory', productId, `${movementType}: ${quantity} units`);
+    return { success: true };
   };
 
-  const bulkStockChange = (
+  const bulkStockChange = async (
     changes: { productId: string; quantity: number }[],
     warehouseId: string,
     movementType: StockMovementType,
     reason: string,
     refNum?: string
-  ) => {
-    changes.forEach(change => {
-      recordStockMovement(
+  ): Promise<{ success: boolean; error?: string; failedCount?: number }> => {
+    const failures: string[] = [];
+    for (const change of changes) {
+      const result = await recordStockMovement(
         change.productId,
         warehouseId,
         movementType,
@@ -1786,7 +2146,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         refNum,
         'Bulk Stock Change operation'
       );
-    });
+      if (!result.success) {
+        failures.push(result.error || change.productId);
+      }
+    }
+
+    if (failures.length > 0) {
+      return {
+        success: false,
+        error: `${failures.length} of ${changes.length} stock updates failed to sync to Supabase: ${failures.join('; ')}`,
+        failedCount: failures.length
+      };
+    }
+    return { success: true };
   };
 
   const bulkPricesChange = (
@@ -2035,9 +2407,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setSelectedBranchId,
         setLanguage,
         login,
+        setPassword,
         registerCustomer,
         registerAffiliateEx,
         registerAgentEx,
+        upgradeToAffiliate,
+        upgradeToAgent,
         logout,
         addAddress,
         editAddress,
