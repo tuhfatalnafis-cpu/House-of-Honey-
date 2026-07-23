@@ -17,6 +17,12 @@ export default defineConfig(() => {
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      // Proxy the payment backend (server/) so the SPA can call /api/payment/* and
+      // Techarm's callback can hit /checkout/callback during local development.
+      proxy: {
+        '/api': { target: `http://localhost:${process.env.PORT || 8787}`, changeOrigin: true },
+        '/checkout/callback': { target: `http://localhost:${process.env.PORT || 8787}`, changeOrigin: true },
+      },
     },
   };
 });

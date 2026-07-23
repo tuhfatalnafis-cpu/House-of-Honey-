@@ -163,8 +163,20 @@ CREATE TABLE IF NOT EXISTS orders (
   commission_paid BOOLEAN NOT NULL DEFAULT false,
   payment_status TEXT NOT NULL DEFAULT 'Pending',
   fulfillment_status TEXT NOT NULL DEFAULT 'Processing',
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  payment_ref TEXT,
+  gateway_bill_id TEXT,
+  payment_channel TEXT,
+  payment_confirmed_at TEXT
 );
+
+-- Migration for existing databases: adds the payment-gateway columns above if the
+-- orders table was already created before this app supported real gateway payments.
+ALTER TABLE orders
+  ADD COLUMN IF NOT EXISTS payment_ref TEXT,
+  ADD COLUMN IF NOT EXISTS gateway_bill_id TEXT,
+  ADD COLUMN IF NOT EXISTS payment_channel TEXT,
+  ADD COLUMN IF NOT EXISTS payment_confirmed_at TEXT;
 
 -- --------------------------------------------------------------------
 -- 10. Website Config (CMS) Table

@@ -167,8 +167,20 @@ CREATE TABLE IF NOT EXISTS orders (
   commission_paid BOOLEAN NOT NULL DEFAULT false,
   payment_status TEXT NOT NULL DEFAULT 'Pending',
   fulfillment_status TEXT NOT NULL DEFAULT 'Processing',
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  payment_ref TEXT,
+  gateway_bill_id TEXT,
+  payment_channel TEXT,
+  payment_confirmed_at TEXT
 );
+
+-- Migration for existing databases: adds the payment-gateway columns above if the
+-- orders table was already created before this app supported real gateway payments.
+ALTER TABLE orders
+  ADD COLUMN IF NOT EXISTS payment_ref TEXT,
+  ADD COLUMN IF NOT EXISTS gateway_bill_id TEXT,
+  ADD COLUMN IF NOT EXISTS payment_channel TEXT,
+  ADD COLUMN IF NOT EXISTS payment_confirmed_at TEXT;
 
 -- 10. Website Config (CMS) Table
 CREATE TABLE IF NOT EXISTS website_config (
@@ -428,6 +440,10 @@ function mapOrder(row: any): Order {
     paymentStatus: row.payment_status || 'Pending',
     fulfillmentStatus: row.fulfillment_status || 'Processing',
     createdAt: row.created_at,
+    paymentRef: row.payment_ref || undefined,
+    gatewayBillId: row.gateway_bill_id || undefined,
+    paymentChannel: row.payment_channel || undefined,
+    paymentConfirmedAt: row.payment_confirmed_at || undefined,
   };
 }
 
@@ -824,7 +840,11 @@ export const supabaseDb = {
         commission_paid: o.commissionPaid,
         payment_status: o.paymentStatus,
         fulfillment_status: o.fulfillmentStatus,
-        created_at: o.createdAt
+        created_at: o.createdAt,
+        payment_ref: o.paymentRef || null,
+        gateway_bill_id: o.gatewayBillId || null,
+        payment_channel: o.paymentChannel || null,
+        payment_confirmed_at: o.paymentConfirmedAt || null
       }));
       const { error } = await supabase.from('orders').upsert(rows);
       return !error;

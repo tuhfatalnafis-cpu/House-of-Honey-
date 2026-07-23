@@ -33,8 +33,11 @@ import {
 // known only to admins (e.g. bookmarked as https://yoursite/?hqadmin=1).
 const hasSecretAdminLink = () => typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('hqadmin');
 
+// Set by server/routes/callback.js when redirecting a payer back from the payment gateway.
+const hasCheckoutReturn = () => typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('checkout_result');
+
 function MainLayout() {
-  const [currentTab, setCurrentTab] = useState<'home' | 'search' | 'cart' | 'account'>(() => hasSecretAdminLink() ? 'account' : 'home');
+  const [currentTab, setCurrentTab] = useState<'home' | 'search' | 'cart' | 'account'>(() => hasCheckoutReturn() ? 'cart' : hasSecretAdminLink() ? 'account' : 'home');
   const [activeSubPanel, setActiveSubPanel] = useState<'affiliate' | 'agent' | 'admin' | 'profile_editor' | null>(() => hasSecretAdminLink() ? 'admin' : null);
 
   const { 

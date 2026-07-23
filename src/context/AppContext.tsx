@@ -174,7 +174,9 @@ interface AppContextType {
     shippingAddress: string;
     isGuest?: boolean;
     agentId?: string; // buy from specific agent's micro-stock
-  }) => { success: boolean; orderId?: string; error?: string };
+  }) => Promise<{ success: boolean; orderId?: string; error?: string; redirecting?: boolean }>;
+  finalizeOrderPaymentResult: (refId: string, status: 'Paid' | 'Failed', billId?: string) => void;
+  checkoutReturnPending: boolean;
 
   // Admin Dashboard Management Operations
   verifyIC: (profileId: string) => void;
@@ -534,6 +536,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
   }, [affiliates]);
+
+  const [checkoutReturnPending, setCheckoutReturnPending] = useState(false);
+
+  // URL parsing of a payment-gateway return redirect (set by server/routes/callback.js).
+  // The status is never trusted from the URL alone — always re-verified server-side first.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const result = params.get('checkout_result');
+    const refId = params.get('ref_id');
+    if (!result || !refId) return;
+
+    const billId = params.get('bill_id') || undefined;
+    setCheckoutReturnPending(true);
+
+    fetch('/api/payment/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refId, billId }),
+    })
+      .then(res => res.json())
+      .then(json => {
+        const finalStatus: 'Paid' | 'Failed' = json.success && json.status === 'Paid' ? 'Paid' : 'Failed';
+        finalizeOrderPaymentResult(refId, finalStatus, billId);
+      })
+      .catch(() => {
+        finalizeOrderPaymentResult(refId, 'Failed', billId);
+      })
+      .finally(() => {
+        setCheckoutReturnPending(false);
+        const url = new URL(window.location.href);
+        url.searchParams.delete('checkout_result');
+        url.searchParams.delete('ref_id');
+        url.searchParams.delete('bill_id');
+        window.history.replaceState({}, '', url.toString());
+      });
+  }, []);
 
   const setLanguage = (lang: 'en' | 'ms') => {
     setLanguageState(lang);
@@ -1424,16 +1462,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const clearCart = () => setCart([]);
 
   /**
-   * CORE CHECKOUT FLOW - Double checks inventory, referral commissions, agent logs, and updates DB
+   * CORE CHECKOUT FLOW, PHASE 1 — validates inventory, creates a Pending order, and hands off
+   * to the payment gateway. Stock/commission are NOT touched here: they're only applied once
+   * the payment is actually confirmed, in finalizeOrderPaymentResult below.
    */
-  const checkout = (details: {
+  const checkout = async (details: {
     customerName: string;
     customerEmail: string;
     customerPhone: string;
     shippingAddress: string;
     isGuest?: boolean;
     agentId?: string; // buy from specific agent's micro-stock
-  }) => {
+  }): Promise<{ success: boolean; orderId?: string; error?: string; redirecting?: boolean }> => {
     if (cart.length === 0) {
       return { success: false, error: 'Shopping cart is empty' };
     }
@@ -1457,9 +1497,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    const orderId = `ord-${Date.now().toString().slice(-4)}`;
+    const orderId = `ord-${Date.now()}`;
     const subtotal = cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
-    const totalQty = cart.reduce((sum, item) => sum + item.quantity, 0);
 
     let orderReferralCode = referralCode || undefined;
     let orderAffiliateId = undefined;
@@ -1497,90 +1536,152 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       affiliateId: orderAffiliateId,
       agentId: details.agentId,
       commissionPaid: false,
-      paymentStatus: 'Paid',
+      paymentStatus: 'Pending',
       fulfillmentStatus: 'Processing',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      paymentRef: orderId
     };
 
-    // Update main inventories if HQ order
-    if (!details.agentId) {
-      setProducts(prev => {
-        const updated = prev.map(p => {
-          const cartMatch = cart.find(item => item.product.id === p.id);
-          return cartMatch ? { ...p, stock: Math.max(0, p.stock - cartMatch.quantity) } : p;
+    // Write immediately (before redirecting away) so the callback handler can find and
+    // finalize this order server-side even if this browser tab never comes back. This write is
+    // AWAITED (not fire-and-forget, unlike most other mutators in this file): the app reloads
+    // Supabase data on every mount and overwrites local state with it, so if this order never
+    // makes it to Supabase before window.location.href navigates away, the round trip back from
+    // the gateway would silently lose it (localStorage gets clobbered by a stale cloud snapshot).
+    setOrders(prev => [newOrder, ...prev]);
+    if (isSupabaseConfigured) await supabaseDb.upsertOrders([newOrder]);
+
+    // Cart is intentionally left untouched here — it only clears once payment is confirmed
+    // Paid, so a failed/abandoned payment leaves the shopper able to retry from where they left off.
+
+    try {
+      const res = await fetch('/api/payment/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          refId: orderId,
+          amount: subtotal.toFixed(2),
+          fullName: details.customerName,
+          mobile: details.customerPhone,
+          email: details.customerEmail,
+          description: `Order ${orderId}`
+        })
+      });
+      const json = await res.json();
+
+      if (!res.ok || !json.success) {
+        const failedOrder = { ...newOrder, paymentStatus: 'Failed' as const };
+        setOrders(prev => prev.map(o => o.id === orderId ? failedOrder : o));
+        if (isSupabaseConfigured) await supabaseDb.upsertOrders([failedOrder]);
+        return { success: false, error: json.error || 'Unable to start payment.' };
+      }
+
+      const patchedOrder = { ...newOrder, gatewayBillId: json.billId, paymentChannel: 'FPX' };
+      setOrders(prev => prev.map(o => o.id === orderId ? patchedOrder : o));
+      if (isSupabaseConfigured) await supabaseDb.upsertOrders([patchedOrder]);
+
+      window.location.href = json.redirectUrl;
+      return { success: true, orderId, redirecting: true };
+    } catch (err) {
+      const failedOrder = { ...newOrder, paymentStatus: 'Failed' as const };
+      setOrders(prev => prev.map(o => o.id === orderId ? failedOrder : o));
+      if (isSupabaseConfigured) await supabaseDb.upsertOrders([failedOrder]);
+      return { success: false, error: 'Unable to reach payment gateway.' };
+    }
+  };
+
+  /**
+   * CORE CHECKOUT FLOW, PHASE 2 — called once the gateway confirms a Pending order's outcome
+   * (via the callback-driven URL return, or a manual status poll). Applies everything that
+   * used to happen synchronously at checkout time: stock decrement, agent stock log, and
+   * affiliate commission/tier allocation — all gated on the payment actually having succeeded.
+   */
+  const finalizeOrderPaymentResult = (refId: string, status: 'Paid' | 'Failed', billId?: string) => {
+    const target = orders.find(o => o.paymentRef === refId || o.id === refId);
+    // Not found, or already resolved by an earlier callback/poll — nothing to do.
+    if (!target || target.paymentStatus !== 'Pending') {
+      return;
+    }
+
+    const patchedOrder: Order = {
+      ...target,
+      paymentStatus: status,
+      gatewayBillId: billId || target.gatewayBillId,
+      paymentConfirmedAt: new Date().toISOString()
+    };
+
+    setOrders(prev => prev.map(o => o.id === target.id ? patchedOrder : o));
+    if (isSupabaseConfigured) supabaseDb.upsertOrders([patchedOrder]);
+
+    if (status !== 'Paid') {
+      return;
+    }
+
+    const orderTotalQty = target.items.reduce((sum, it) => sum + it.quantity, 0);
+
+    if (!target.agentId) {
+      setProducts(prevProducts => {
+        const updatedProducts = prevProducts.map(p => {
+          const match = target.items.find(it => it.productId === p.id);
+          if (!match) return p;
+          if (p.stock < match.quantity) {
+            console.warn(`[checkout] Order ${target.id} oversold "${p.name}" (had ${p.stock}, needed ${match.quantity}) — payment already succeeded; flag for manual fulfillment review.`);
+          }
+          return { ...p, stock: Math.max(0, p.stock - match.quantity) };
         });
-        if (isSupabaseConfigured) supabaseDb.upsertProducts(updated);
-        return updated;
+        if (isSupabaseConfigured) supabaseDb.upsertProducts(updatedProducts);
+        return updatedProducts;
       });
     } else {
-      // Decrement micro stock from agent allocation
-      setAgents(prev => {
-        const updated = prev.map(agt => {
-          if (agt.id === details.agentId) {
-            const nextBal = Math.max(0, agt.stockBalance - totalQty);
-            const updatedAgt = { ...agt, stockBalance: nextBal };
-            if (isSupabaseConfigured) {
-              supabaseDb.upsertAgents([updatedAgt]);
-            }
-            return updatedAgt;
-          }
-          return agt;
+      setAgents(prevAgents => {
+        const updatedAgents = prevAgents.map(agt => {
+          if (agt.id !== target.agentId) return agt;
+          const nextBal = Math.max(0, agt.stockBalance - orderTotalQty);
+          const updatedAgt = { ...agt, stockBalance: nextBal };
+          if (isSupabaseConfigured) supabaseDb.upsertAgents([updatedAgt]);
+          return updatedAgt;
         });
-        return updated;
+        return updatedAgents;
       });
 
-      // Log the Stock Log Sale
-      cart.forEach(item => {
+      target.items.forEach(item => {
         const itemLog: AgentStockLog = {
-          id: `log-sale-${Date.now().toString().slice(-4)}-${item.product.id}`,
-          agentId: details.agentId!,
-          productId: item.product.id,
+          id: `log-sale-${Date.now().toString().slice(-4)}-${item.productId}`,
+          agentId: target.agentId!,
+          productId: item.productId,
           quantity: -item.quantity,
           action: 'sale',
-          transactionId: orderId,
-          notes: `Retail sales order fulfillment #${orderId}.`,
+          transactionId: target.id,
+          notes: `Retail sales order fulfillment #${target.id}.`,
           createdAt: new Date().toISOString()
         };
-        setAgentStockLogs(prev => [itemLog, ...prev]);
-        if (isSupabaseConfigured) {
-          supabaseDb.upsertAgentStockLogs([itemLog]);
-        }
+        setAgentStockLogs(prevLogs => [itemLog, ...prevLogs]);
+        if (isSupabaseConfigured) supabaseDb.upsertAgentStockLogs([itemLog]);
       });
     }
 
-    // Allocate referral rewards
-    if (orderAffiliateId) {
-      setAffiliates(prev => {
-        const updated = prev.map(aff => {
-          if (aff.id === orderAffiliateId) {
-            const newUnitsSold = aff.unitsSold + totalQty;
-            const newLifetimeSales = aff.lifetimeSales + subtotal;
-            const newLifetimeCommissions = aff.lifetimeCommissions + commissionAmt;
-            const newTier = getTierFromUnits(newUnitsSold);
-
-            return {
-              ...aff,
-              unitsSold: newUnitsSold,
-              lifetimeSales: newLifetimeSales,
-              lifetimeCommissions: parseFloat(newLifetimeCommissions.toFixed(2)),
-              tier: newTier
-            };
-          }
-          return aff;
+    if (target.affiliateId) {
+      setAffiliates(prevAffiliates => {
+        const updatedAffiliates = prevAffiliates.map(aff => {
+          if (aff.id !== target.affiliateId) return aff;
+          const commissionAmt = target.affiliateCommission || 0;
+          const newUnitsSold = aff.unitsSold + orderTotalQty;
+          const newLifetimeSales = aff.lifetimeSales + target.total;
+          const newLifetimeCommissions = aff.lifetimeCommissions + commissionAmt;
+          return {
+            ...aff,
+            unitsSold: newUnitsSold,
+            lifetimeSales: newLifetimeSales,
+            lifetimeCommissions: parseFloat(newLifetimeCommissions.toFixed(2)),
+            tier: getTierFromUnits(newUnitsSold)
+          };
         });
-        if (isSupabaseConfigured) supabaseDb.upsertAffiliates(updated);
-        return updated;
+        if (isSupabaseConfigured) supabaseDb.upsertAffiliates(updatedAffiliates);
+        return updatedAffiliates;
       });
     }
-
-    setOrders(prev => {
-      const updated = [newOrder, ...prev];
-      if (isSupabaseConfigured) supabaseDb.upsertOrders([newOrder]);
-      return updated;
-    });
 
     clearCart();
-    return { success: true, orderId };
   };
 
   /**
@@ -2428,6 +2529,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         removeFromCart,
         clearCart,
         checkout,
+        finalizeOrderPaymentResult,
+        checkoutReturnPending,
         verifyIC,
         addAuditLog,
         updateUserStatus,

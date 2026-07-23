@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAppState } from '../context/AppContext';
 import { X, Trash2, ShoppingCart, User, Mail, Phone, MapPin, Check, CreditCard, Sparkles, Building2 } from 'lucide-react';
 import { translations, getProductTranslation } from '../lib/translations';
@@ -26,6 +26,8 @@ export const Cart: React.FC<CartProps> = ({ isOpen, onClose, inPage }) => {
     selectedBranchId,
     setSelectedBranchId,
     checkout,
+    orders,
+    checkoutReturnPending,
     language
   } = useAppState();
 
@@ -41,7 +43,7 @@ export const Cart: React.FC<CartProps> = ({ isOpen, onClose, inPage }) => {
 
   // Order status checkout tracking
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [checkoutStep, setCheckoutStep] = useState<'cart' | 'shipping' | 'payment_processing' | 'receipt'>('cart');
+  const [checkoutStep, setCheckoutStep] = useState<'cart' | 'shipping' | 'payment_processing' | 'receipt' | 'failed'>('cart');
   const [generatedReceiptId, setGeneratedReceiptId] = useState('');
   const [estimatedCommission, setEstimatedCommission] = useState(0);
 
@@ -104,7 +106,7 @@ export const Cart: React.FC<CartProps> = ({ isOpen, onClose, inPage }) => {
     setIsSubmitting(true);
     setCheckoutStep('payment_processing');
 
-    // Calculate commission ahead to show in simulated receipt
+    // Calculate commission ahead to show as an estimate once the receipt appears
     let calculatedComm = 0;
     if (referralCode) {
       const match = affiliates.find(a => a.code.toUpperCase() === referralCode.toUpperCase().trim());
@@ -114,30 +116,48 @@ export const Cart: React.FC<CartProps> = ({ isOpen, onClose, inPage }) => {
     }
     setEstimatedCommission(calculatedComm);
 
-    // Simulate Payment delay (makes the interface feel high-fidelity)
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    const result = checkout({
+    const result = await checkout({
       customerName,
       customerEmail,
       customerPhone,
       shippingAddress
     });
 
-    setIsSubmitting(false);
-
-    if (result.success) {
-      setGeneratedReceiptId(result.orderId || 'ord-9999');
-      setCheckoutStep('receipt');
-    } else {
-      if (language === 'ms') {
-        alert(`Pembayaran gagal: ${result.error}`);
-      } else {
-        alert(`Checkout failed: ${result.error}`);
-      }
-      setCheckoutStep('shipping');
+    if (result.redirecting) {
+      // Browser is about to navigate to the gateway's hosted payment page — keep the spinner up.
+      return;
     }
+
+    // Any non-redirecting outcome here means checkout() couldn't even reach the gateway.
+    setIsSubmitting(false);
+    setCheckoutStep('failed');
   };
+
+  // Returning from the payment gateway redirect: reflect the confirmed outcome once
+  // AppContext's own status re-verify (triggered from the ?checkout_result URL param) resolves.
+  // Captured once on mount, not re-read on every run — AppContext strips these params from
+  // the URL once it resolves, which would otherwise race with this effect re-reading them.
+  const [pendingCheckoutRefId] = useState(() => new URLSearchParams(window.location.search).get('ref_id'));
+
+  useEffect(() => {
+    if (!pendingCheckoutRefId) return;
+
+    if (checkoutReturnPending) {
+      setCheckoutStep('payment_processing');
+      return;
+    }
+
+    const match = orders.find(o => o.paymentRef === pendingCheckoutRefId || o.id === pendingCheckoutRefId);
+    if (!match) return;
+
+    if (match.paymentStatus === 'Paid') {
+      setGeneratedReceiptId(match.id);
+      setEstimatedCommission(match.affiliateCommission || 0);
+      setCheckoutStep('receipt');
+    } else if (match.paymentStatus === 'Failed') {
+      setCheckoutStep('failed');
+    }
+  }, [pendingCheckoutRefId, checkoutReturnPending, orders]);
 
   const resetCheckoutFlow = () => {
     setCustomerName('');
@@ -146,6 +166,12 @@ export const Cart: React.FC<CartProps> = ({ isOpen, onClose, inPage }) => {
     setShippingAddress('');
     setCheckoutStep('cart');
     onClose();
+  };
+
+  // After a failed/cancelled payment, return to the order cart — keeps the shipping details
+  // the shopper already entered so they don't need to retype them if they check out again.
+  const handleRetryPayment = () => {
+    setCheckoutStep('cart');
   };
 
   return (
@@ -171,6 +197,7 @@ export const Cart: React.FC<CartProps> = ({ isOpen, onClose, inPage }) => {
                 {checkoutStep === 'shipping' && translations.enterAddress[language]}
                 {checkoutStep === 'payment_processing' && translations.routingGateway[language]}
                 {checkoutStep === 'receipt' && translations.receiptStepTitle[language]}
+                {checkoutStep === 'failed' && translations.paymentFailedTitle[language]}
               </p>
             </div>
           </div>
@@ -466,6 +493,28 @@ export const Cart: React.FC<CartProps> = ({ isOpen, onClose, inPage }) => {
             </div>
           )}
 
+          {checkoutStep === 'failed' && (
+            <div className="flex flex-col items-center justify-center py-16 space-y-6 text-center animate-scale-up">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-100 text-red-600">
+                <X className="h-8 w-8" strokeWidth={3} />
+              </div>
+              <div className="space-y-2">
+                <h4 className="text-base font-extrabold text-gray-900 font-sans tracking-tight">
+                  {translations.paymentFailedTitle[language]}
+                </h4>
+                <p className="text-xs text-gray-500 max-w-xs leading-relaxed">
+                  {translations.paymentFailedDesc[language]}
+                </p>
+              </div>
+              <button
+                onClick={handleRetryPayment}
+                className="bg-[#EE4D2D] hover:bg-[#FF6B4A] text-white font-bold py-2.5 px-6 rounded-xl text-xs shadow-sm cursor-pointer"
+              >
+                {translations.backToCartBtn[language]}
+              </button>
+            </div>
+          )}
+
           {checkoutStep === 'receipt' && (
             <div className="space-y-6 py-4 animate-scale-up">
               <div className="flex flex-col items-center text-center space-y-2">
@@ -499,7 +548,7 @@ export const Cart: React.FC<CartProps> = ({ isOpen, onClose, inPage }) => {
 
                   <span className="text-gray-400 font-semibold">{translations.gatewayLabel[language]}</span>
                   <span className="text-right font-bold text-[#EE4D2D]">
-                    {translations.simulatedGatewayName[language]}
+                    {translations.realGatewayName[language]}
                   </span>
 
                   <span className="text-gray-400 font-semibold">{translations.locationHubLabel[language]}</span>

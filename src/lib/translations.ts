@@ -301,8 +301,8 @@ export const translations: TranslationDictionary = {
     ms: "Kembali ke Troli"
   },
   confirmPaymentBtn: {
-    en: "Confirm (Stripe / FPX)",
-    ms: "Sahkan (Stripe / FPX)"
+    en: "Confirm & Pay (FPX)",
+    ms: "Sahkan & Bayar (FPX)"
   },
 
   // Payment Gateway simulation
@@ -317,6 +317,14 @@ export const translations: TranslationDictionary = {
   noRefreshWarning: {
     en: "DO NOT REFRESH OR HIT BACK BUTTON",
     ms: "JANGAN SEGAR SEMULA ATAU TEKAN BUTANG KEMBALI"
+  },
+  paymentFailedTitle: {
+    en: "Payment Not Completed",
+    ms: "Pembayaran Tidak Berjaya"
+  },
+  paymentFailedDesc: {
+    en: "Your payment could not be completed or was cancelled. Your cart and delivery details have been kept — you can try again.",
+    ms: "Pembayaran anda tidak dapat diselesaikan atau telah dibatalkan. Troli dan butiran penghantaran anda telah disimpan — anda boleh cuba lagi."
   },
 
   // Receipt
@@ -344,9 +352,9 @@ export const translations: TranslationDictionary = {
     en: "Gateway",
     ms: "Gerbang"
   },
-  simulatedGatewayName: {
-    en: "Stripe/FPX Simulated",
-    ms: "Simulasi Stripe/FPX"
+  realGatewayName: {
+    en: "FPX via Fintrixpay",
+    ms: "FPX melalui Fintrixpay"
   },
   locationHubLabel: {
     en: "Location Hub",

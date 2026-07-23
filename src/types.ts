@@ -277,6 +277,10 @@ export interface Order {
   paymentStatus: 'Pending' | 'Paid' | 'Failed' | 'Refunded';
   fulfillmentStatus: 'Processing' | 'Shipped' | 'Delivered';
   createdAt?: string;
+  paymentRef?: string;         // ref_id sent to the payment gateway (== Order.id)
+  gatewayBillId?: string;      // bill_id returned by the payment gateway's Init Payment call
+  paymentChannel?: string;     // 'FPX' | 'DNQR'
+  paymentConfirmedAt?: string; // ISO timestamp when the gateway result was confirmed Paid/Failed
 }
 
 // New — persisted recruitment invites
