@@ -137,7 +137,7 @@ export const Cart: React.FC<CartProps> = ({ isOpen, onClose, inPage }) => {
   // AppContext's own status re-verify (triggered from the ?checkout_result URL param) resolves.
   // Captured once on mount, not re-read on every run — AppContext strips these params from
   // the URL once it resolves, which would otherwise race with this effect re-reading them.
-  const [pendingCheckoutRefId] = useState(() => new URLSearchParams(window.location.search).get('ref_id'));
+  const [pendingCheckoutRefId, setPendingCheckoutRefId] = useState(() => new URLSearchParams(window.location.search).get('ref_id'));
 
   useEffect(() => {
     if (!pendingCheckoutRefId) return;
@@ -149,6 +149,12 @@ export const Cart: React.FC<CartProps> = ({ isOpen, onClose, inPage }) => {
 
     const match = orders.find(o => o.paymentRef === pendingCheckoutRefId || o.id === pendingCheckoutRefId);
     if (!match) return;
+
+    // Resolved — clear the tracked ref so this effect goes inert. Without this, any later
+    // `orders` change (e.g. a brand-new checkout attempt creating its own Pending order) would
+    // re-run this effect, find this same now-stale order still Paid/Failed, and snap
+    // checkoutStep back to receipt/failed in the middle of the new attempt.
+    setPendingCheckoutRefId(null);
 
     if (match.paymentStatus === 'Paid') {
       setGeneratedReceiptId(match.id);
